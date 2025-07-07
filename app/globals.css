@@ -1,0 +1,82 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 200 14% 6%; /* #0A0F0D */
+    --foreground: 150 25% 95%;
+    --card: 200 14% 6%;
+    --card-foreground: 150 25% 95%;
+    --popover: 200 14% 6%;
+    --popover-foreground: 150 25% 95%;
+    --primary: 152 64% 52%; /* #34D399 */
+    --primary-foreground: 200 14% 6%;
+    --secondary: 172 64% 52%; /* #2DD4BF */
+    --secondary-foreground: 200 14% 6%;
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+    --accent: 217.2 32.6% 17.5%;
+    --accent-foreground: 150 25% 95%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 150 25% 95%;
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: 152 64% 52%;
+    --radius: 0.5rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+.bg-grid-white\/\[0\.05\] {
+  background-image: linear-gradient(to right, rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+@layer utilities {
+  @keyframes nuke-flash {
+    0%,
+    100% {
+      opacity: 0;
+    }
+    10%,
+    30% {
+      opacity: 0.7;
+    }
+  }
+  @keyframes nuke-shake {
+    0%,
+    100% {
+      transform: translate(0, 0) rotate(0);
+    }
+    10%,
+    30%,
+    50%,
+    70%,
+    90% {
+      transform: translate(-5px, 5px) rotate(-1deg);
+    }
+    20%,
+    40%,
+    60%,
+    80% {
+      transform: translate(5px, -5px) rotate(1deg);
+    }
+  }
+
+  .animate-nuke-flash {
+    animation: nuke-flash 4.5s ease-in-out forwards;
+  }
+  .animate-nuke-shake {
+    animation: nuke-shake 0.5s ease-in-out forwards;
+  }
+}
