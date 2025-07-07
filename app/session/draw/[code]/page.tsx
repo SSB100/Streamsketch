@@ -67,6 +67,12 @@ function DrawPageContent({ params }: { params: { code: string } }) {
   const isFirstSegmentOfStroke = useRef(true)
   const creditSpentRef = useRef(false)
 
+  // Use a ref to hold the session to prevent re-creating callbacks that depend on it
+  const sessionRef = useRef(session)
+  useEffect(() => {
+    sessionRef.current = session
+  }, [session])
+
   const handleIncomingDrawBatch = useCallback(
     ({ segments }: { segments: Drawing[] }) => {
       if (segments.length > 0 && segments[0]?.drawer_wallet_address !== publicKey?.toBase58()) {
@@ -90,12 +96,14 @@ function DrawPageContent({ params }: { params: { code: string } }) {
   )
   const channel = useRealtimeChannel(session?.id ?? null, channelOptions)
 
+  // This callback is now stable and won't cause re-renders.
+  // It safely reads the session ID from a ref.
   const refreshUserData = useCallback(async () => {
-    if (!publicKey || !session) return
+    if (!publicKey || !sessionRef.current) return
     try {
       const [paidData, freeData] = await Promise.all([
         getUserData(publicKey.toBase58()),
-        getFreeCreditsForSession(publicKey.toBase58(), session.id),
+        getFreeCreditsForSession(publicKey.toBase58(), sessionRef.current.id),
       ])
       setCredits({
         paidLines: paidData.lineCredits,
@@ -107,7 +115,7 @@ function DrawPageContent({ params }: { params: { code: string } }) {
       console.error("Failed to refresh user data:", err)
       toast.error("Could not refresh your credit balance.")
     }
-  }, [publicKey, session])
+  }, [publicKey])
 
   useEffect(() => {
     async function bootstrap() {
@@ -119,8 +127,13 @@ function DrawPageContent({ params }: { params: { code: string } }) {
           setIsLoading(false)
           return
         }
+
+        // FIX: Manually update the ref before the first data fetch to prevent a race condition.
+        // This ensures `refreshUserData` has the session ID immediately.
+        sessionRef.current = s as { id: string; owner_wallet_address: string }
         setSession(s as { id: string; owner_wallet_address: string })
         setInitialDrawings(d)
+
         if (publicKey) {
           await refreshUserData()
         }
@@ -147,16 +160,16 @@ function DrawPageContent({ params }: { params: { code: string } }) {
     if (drawingTimeoutRef.current) clearTimeout(drawingTimeoutRef.current)
     broadcastDrawingSegments()
 
-    if (publicKey && session && currentStrokeRef.current.length > 0) {
+    if (publicKey && sessionRef.current && currentStrokeRef.current.length > 0) {
       const strokeToSave = [...currentStrokeRef.current]
-      addDrawingSegments(session.id, strokeToSave).catch((err) => {
+      addDrawingSegments(sessionRef.current.id, strokeToSave).catch((err) => {
         console.error("Failed to save drawing stroke:", err)
       })
     }
 
     currentStrokeRef.current = []
     creditSpentRef.current = false
-  }, [broadcastDrawingSegments, publicKey, session])
+  }, [broadcastDrawingSegments, publicKey])
 
   const handleDrawStart = useCallback(() => {
     if (credits.paidLines < 1 && credits.freeLines < 1) {
@@ -182,7 +195,7 @@ function DrawPageContent({ params }: { params: { code: string } }) {
 
   const handleDraw = useCallback(
     async (drawing: Omit<Drawing, "drawer_wallet_address" | "id">) => {
-      if (!publicKey || !session) return
+      if (!publicKey || !sessionRef.current) return
 
       const newSegment: DrawingSegment = { ...drawing, drawer_wallet_address: publicKey.toBase58() }
       broadcastBufferRef.current.push(newSegment)
@@ -198,7 +211,7 @@ function DrawPageContent({ params }: { params: { code: string } }) {
           paidLines: p.freeLines > 0 ? p.paidLines : p.paidLines - 1,
         }))
 
-        spendDrawingCredit(publicKey.toBase58(), session.id).then((res) => {
+        spendDrawingCredit(publicKey.toBase58(), sessionRef.current.id).then((res) => {
           if (!res.success) {
             console.error("Failed to spend credit:", res.error)
             toast.error("Credit spend failed, refreshing balance.")
@@ -207,18 +220,18 @@ function DrawPageContent({ params }: { params: { code: string } }) {
         })
       }
     },
-    [publicKey, session, refreshUserData],
+    [publicKey, refreshUserData],
   )
 
   const handleNuke = async (animation: NukeAnimation) => {
-    if (!publicKey || !wallet || !sendTransaction || !session || !channel) {
+    if (!publicKey || !wallet || !sendTransaction || !sessionRef.current || !channel) {
       toast.error("Wallet not fully connected or session invalid.")
       return
     }
 
     if (animation.id === "free_nuke") {
       try {
-        const result = await freeNukeAction(publicKey.toBase58(), session.id)
+        const result = await freeNukeAction(publicKey.toBase58(), sessionRef.current.id)
         if (!result.success) {
           toast.error("Failed to use free nuke.", { description: result.error })
           return
@@ -268,7 +281,7 @@ function DrawPageContent({ params }: { params: { code: string } }) {
       setNukeEvent({ username: usernameForBroadcast, animationId: animation.id })
       setIsNukeDialogOpen(false)
 
-      processNukePurchase(publicKey.toBase58(), session.id, animation, signature).catch((err) => {
+      processNukePurchase(publicKey.toBase58(), sessionRef.current.id, animation, signature).catch((err) => {
         console.error("Background nuke processing failed:", err)
         toast.warning("Nuke successful, but there was a server issue. Please contact support.", { duration: 10000 })
       })
