@@ -41,9 +41,10 @@ type Session = {
 
 interface SessionManagerProps {
   initialSessions: Session[]
+  onSessionUpdate: () => void
 }
 
-export function SessionManager({ initialSessions }: SessionManagerProps) {
+export function SessionManager({ initialSessions, onSessionUpdate }: SessionManagerProps) {
   const { publicKey } = useWallet()
   const [sessions, setSessions] = useState(initialSessions)
   const [isCreating, setIsCreating] = useState(false)
@@ -65,6 +66,7 @@ export function SessionManager({ initialSessions }: SessionManagerProps) {
         setSessions((prev) => [result.data, ...prev])
         setSessionName("")
         setIsDialogOpen(false)
+        onSessionUpdate()
       } else {
         toast.error("Failed to create session", { description: result.error })
       }
@@ -86,6 +88,7 @@ export function SessionManager({ initialSessions }: SessionManagerProps) {
       if (result.success) {
         toast.success("Session deleted.")
         setSessions((prev) => prev.filter((s) => s.id !== sessionId))
+        onSessionUpdate()
       } else {
         toast.error("Failed to delete session", { description: result.error })
       }
@@ -153,7 +156,6 @@ export function SessionManager({ initialSessions }: SessionManagerProps) {
           <TableHeader>
             <TableRow>
               <TableHead className="text-white">Session Code</TableHead>
-              <TableHead className="text-white">Status</TableHead>
               <TableHead className="text-white">Created</TableHead>
               <TableHead className="text-right text-white">Actions</TableHead>
             </TableRow>
@@ -169,58 +171,30 @@ export function SessionManager({ initialSessions }: SessionManagerProps) {
                         variant="ghost"
                         size="icon"
                         className="h-6 w-6"
-                        onClick={() => copyToClipboard(session.short_code, "Session code copied!")}
+                        onClick={() =>
+                          copyToClipboard(
+                            `${window.location.origin}/session/draw/${session.short_code}`,
+                            "Draw link copied!",
+                          )
+                        }
                       >
                         <Copy className="h-3 w-3" />
                       </Button>
                     </div>
                   </TableCell>
-                  <TableCell>
-                    <span
-                      className={`rounded-full px-2 py-1 text-xs ${
-                        session.is_active ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"
-                      }`}
-                    >
-                      {session.is_active ? "Active" : "Inactive"}
-                    </span>
-                  </TableCell>
                   <TableCell>{new Date(session.created_at).toLocaleDateString()}</TableCell>
                   <TableCell className="text-right">
                     <div className="flex items-center justify-end gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="border-secondary text-secondary hover:bg-secondary/10 hover:text-secondary bg-transparent"
-                        onClick={() =>
-                          copyToClipboard(
-                            `https://streamsketch.tech/session/view/${session.short_code}`,
-                            "OBS view link copied!",
-                          )
-                        }
-                      >
-                        <Copy className="mr-1 h-3 w-3" /> Copy View Link
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="border-primary text-primary hover:bg-primary/10 hover:text-primary bg-transparent"
-                        onClick={() =>
-                          copyToClipboard(
-                            `https://streamsketch.tech/session/draw/${session.short_code}`,
-                            "Viewer draw link copied!",
-                          )
-                        }
-                      >
-                        <LinkIcon className="mr-1 h-3 w-3" /> Copy Draw Link
-                      </Button>
                       <Link href={`/session/view/${session.short_code}`} target="_blank" rel="noopener noreferrer">
-                        <Button
-                          variant="outline"
-                          size="icon"
-                          className="border-secondary text-secondary hover:bg-secondary/10 hover:text-secondary bg-transparent h-9 w-9"
-                        >
-                          <Eye className="h-4 w-4" />
-                          <span className="sr-only">View Session in new tab</span>
+                        <Button variant="outline" size="sm">
+                          <Eye className="mr-2 h-4 w-4" />
+                          Open View
+                        </Button>
+                      </Link>
+                      <Link href={`/session/draw/${session.short_code}`} target="_blank" rel="noopener noreferrer">
+                        <Button variant="outline" size="sm">
+                          <LinkIcon className="mr-2 h-4 w-4" />
+                          Open Draw
                         </Button>
                       </Link>
                       <AlertDialog>
@@ -259,7 +233,7 @@ export function SessionManager({ initialSessions }: SessionManagerProps) {
               ))
             ) : (
               <TableRow>
-                <TableCell colSpan={4} className="text-center text-muted-foreground">
+                <TableCell colSpan={3} className="text-center text-muted-foreground">
                   You haven't created any sessions yet.
                 </TableCell>
               </TableRow>

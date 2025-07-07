@@ -5,7 +5,7 @@ import type { Drawing } from "@/lib/types"
 import { Canvas, type CanvasHandle } from "@/components/whiteboard/canvas"
 import { NukeAnimationOverlay } from "@/components/whiteboard/nuke-animation-overlay"
 import { useRealtimeChannel } from "@/hooks/use-realtime-channel"
-import { getSessionData } from "@/app/actions"
+import { getSessionData, getNewDrawings } from "@/app/actions"
 import { Copy, Eye, Maximize, Minimize } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
@@ -14,24 +14,32 @@ const POLLING_INTERVAL_MS = 5000 // Check for updates every 5 seconds
 
 export default function ViewPage({ params }: { params: { code: string } }) {
   const [session, setSession] = useState<{ id: string } | null>(null)
-  const [drawings, setDrawings] = useState<Drawing[]>([])
+  const [initialDrawings, setInitialDrawings] = useState<Drawing[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [nukeEvent, setNukeEvent] = useState<{ username: string | null; animationId: string } | null>(null)
 
   const canvasRef = useRef<CanvasHandle>(null)
   const fullscreenContainerRef = useRef<HTMLDivElement>(null)
-  const lastRealtimeEventTimestamp = useRef<number>(0)
+  const lastDrawingIdRef = useRef<number>(0)
+  const lastRealtimeEventTimestamp = useRef<number>(Date.now())
 
   const handleIncomingDrawBatch = useCallback(({ segments }: { segments: Drawing[] }) => {
     lastRealtimeEventTimestamp.current = Date.now()
-    setDrawings((current) => [...current, ...segments])
+    if (segments.length > 0) {
+      segments.forEach((drawing) => canvasRef.current?.drawFromBroadcast(drawing))
+      const maxId = Math.max(...segments.map((s) => s.id))
+      if (maxId > lastDrawingIdRef.current) {
+        lastDrawingIdRef.current = maxId
+      }
+    }
   }, [])
 
   const handleIncomingNuke = useCallback(
     ({ username, animationId }: { username: string | null; animationId: string }) => {
       lastRealtimeEventTimestamp.current = Date.now()
-      setDrawings([])
+      canvasRef.current?.clearCanvas()
+      lastDrawingIdRef.current = 0 // Reset on nuke
       setNukeEvent({ username, animationId })
     },
     [],
@@ -51,14 +59,19 @@ export default function ViewPage({ params }: { params: { code: string } }) {
     const fetchInitialData = async () => {
       setIsLoading(true)
       try {
-        const { session: sessionData, drawings: initialDrawings } = await getSessionData(params.code)
+        const { session: sessionData, drawings } = await getSessionData(params.code)
         if (sessionData) {
           setSession(sessionData)
-          setDrawings(initialDrawings)
+          setInitialDrawings(drawings)
+          if (drawings.length > 0) {
+            lastDrawingIdRef.current = Math.max(...drawings.map((d) => d.id))
+          }
+        } else {
+          toast.error("Session not found.")
         }
       } catch (error) {
         console.error("Failed to fetch session data:", error)
-        toast.error("Failed to load session data")
+        toast.error("Failed to load session data.")
       } finally {
         setIsLoading(false)
       }
@@ -66,24 +79,22 @@ export default function ViewPage({ params }: { params: { code: string } }) {
     fetchInitialData()
   }, [params.code])
 
-  // Intelligent Polling for data synchronization
+  // Fallback polling for data synchronization
   useEffect(() => {
-    if (!params.code) return
+    if (!session?.id) return
 
     const intervalId = setInterval(async () => {
-      // If we received a real-time event recently, skip this poll.
-      // This prevents overwriting a line that is actively being drawn.
-      if (Date.now() - lastRealtimeEventTimestamp.current < POLLING_INTERVAL_MS) {
-        console.log("[Polling] Skipped due to recent real-time activity.")
+      if (Date.now() - lastRealtimeEventTimestamp.current < POLLING_INTERVAL_MS * 2) {
         return
       }
 
-      console.log("[Polling] Canvas idle, refetching for synchronization...")
+      console.log("[Polling] Checking for missed drawings...")
       try {
-        const { drawings: dbDrawings } = await getSessionData(params.code)
-        if (dbDrawings) {
-          // The database is the source of truth. Replace local state when idle.
-          setDrawings(dbDrawings)
+        const newDrawings = await getNewDrawings(session.id, lastDrawingIdRef.current)
+        if (newDrawings.length > 0) {
+          toast.info(`Synced ${newDrawings.length} missed drawings.`)
+          newDrawings.forEach((d) => canvasRef.current?.drawFromBroadcast(d))
+          lastDrawingIdRef.current = Math.max(...newDrawings.map((d) => d.id))
         }
       } catch (error) {
         console.error("Polling failed:", error)
@@ -91,23 +102,7 @@ export default function ViewPage({ params }: { params: { code: string } }) {
     }, POLLING_INTERVAL_MS)
 
     return () => clearInterval(intervalId)
-  }, [params.code])
-
-  // Add memory management for drawings
-  useEffect(() => {
-    const cleanup = setInterval(() => {
-      setDrawings((prev) => {
-        // Keep only the last 1000 drawings to prevent memory issues
-        if (prev.length > 1000) {
-          console.log(`[Memory] Trimming drawings from ${prev.length} to 500`)
-          return prev.slice(-500)
-        }
-        return prev
-      })
-    }, 30000) // Check every 30 seconds
-
-    return () => clearInterval(cleanup)
-  }, [])
+  }, [session?.id])
 
   const toggleFullscreen = () => {
     const elem = fullscreenContainerRef.current
@@ -157,7 +152,7 @@ export default function ViewPage({ params }: { params: { code: string } }) {
           width={1280}
           height={720}
           isDrawable={false}
-          initialDrawings={drawings}
+          initialDrawings={initialDrawings}
           onDraw={() => {}}
           onDrawStart={() => {}}
           onDrawEnd={() => {}}
@@ -178,7 +173,7 @@ export default function ViewPage({ params }: { params: { code: string } }) {
           <span className="text-muted-foreground">Session Code:</span>
           <span className="font-mono text-lg font-bold text-neon-pink">{params.code}</span>
           <button
-            onClick={() => copyToClipboard(`https://streamsketch.tech/session/draw/${params.code}`)}
+            onClick={() => copyToClipboard(`${window.location.origin}/session/draw/${params.code}`)}
             className="ml-1 transition-transform hover:scale-110"
           >
             <Copy className="h-4 w-4" />

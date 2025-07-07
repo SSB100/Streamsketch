@@ -1,8 +1,6 @@
 "use server"
 import { createSupabaseAdminClient } from "@/lib/supabase/admin"
 import { revalidatePath } from "next/cache"
-// ⬇️  Place this anywhere after the existing import line for revalidatePath
-export { revalidatePath }
 import type { Drawing } from "@/lib/types"
 import { STREAMER_REVENUE_SHARE, APP_WALLET_ADDRESS } from "@/lib/constants"
 import {
@@ -26,6 +24,10 @@ const CACHE_DURATION = 60000 // Increased to 60 seconds for better performance
 // Cache for session data to avoid repeated queries
 const sessionDataCache = new Map<string, { data: any; timestamp: number }>()
 const SESSION_CACHE_DURATION = 30000 // 30 seconds for session data
+
+export async function revalidateDashboardAction() {
+  revalidatePath("/dashboard")
+}
 
 async function ensureUser(walletAddress: string) {
   const admin = createSupabaseAdminClient()
@@ -201,13 +203,11 @@ export async function getSessionData(shortCode: string) {
   return result
 }
 
-// CORRECTED: This function now matches the signature of the refactored RPC function.
 export async function spendDrawingCredit(drawerWalletAddress: string, sessionId: string) {
   return timeAsync("spendDrawingCredit", async () => {
     const supabase = createSupabaseAdminClient()
 
     try {
-      // CORRECTED: The RPC call no longer sends drawing_data, matching the database function.
       const { error } = await supabase.rpc("spend_credit_and_draw", {
         p_drawer_wallet_address: drawerWalletAddress,
         p_session_id: sessionId,
@@ -228,7 +228,6 @@ export async function spendDrawingCredit(drawerWalletAddress: string, sessionId:
   })
 }
 
-// Clear cache when credits are updated
 export async function processCreditPurchase(
   walletAddress: string,
   txSignature: string,
@@ -297,7 +296,6 @@ export async function processCreditPurchase(
     console.error(`Credit purchase by ${walletAddress} logged incompletely (sig: ${txSignature}):`, logError)
   }
 
-  // Clear cache after purchase
   userDataCache.delete(walletAddress)
   revalidatePath("/dashboard")
   return { success: true, message: `${creditPackage.lines} line credits added successfully!` }
@@ -310,7 +308,7 @@ export async function getUserSessions(walletAddress: string) {
     .select("id, short_code, is_active, created_at")
     .eq("owner_wallet_address", walletAddress)
     .order("created_at", { ascending: false })
-    .limit(20) // Limit to 20 most recent sessions
+    .limit(20)
 
   if (error) throw new Error(error.message)
   return data
@@ -323,7 +321,7 @@ export async function getTransactionHistory(walletAddress: string) {
     .select("id, transaction_type, sol_amount, credit_amount, notes, created_at, signature")
     .eq("user_wallet_address", walletAddress)
     .order("created_at", { ascending: false })
-    .limit(25) // Limit to 25 most recent transactions
+    .limit(25)
 
   if (error) throw new Error(error.message)
   return data
@@ -430,7 +428,6 @@ export async function claimRevenueAction(walletAddress: string) {
       )
     }
 
-    // Clear cache after claiming revenue
     userDataCache.delete(walletAddress)
     revalidatePath("/dashboard")
     return {
@@ -549,7 +546,6 @@ export async function giftCreditsToSessionAction(
     return { success: false, error: error.message }
   }
 
-  // Clear cache for both users
   userDataCache.delete(ownerWallet)
   userDataCache.delete(viewerWallet)
   revalidatePath("/dashboard")
@@ -634,4 +630,20 @@ export async function triggerFreeNukeAction(nukerWalletAddress: string, sessionI
     console.error("[StreamSketch] Free nuke action failed:", error?.message ?? error)
     return { success: false, error: `Failed to use free nuke: ${error?.message ?? "Unknown error"}` }
   }
+}
+
+export async function getNewDrawings(sessionId: string, lastId: number) {
+  const supabase = createSupabaseAdminClient()
+  const { data, error } = await supabase
+    .from("drawings")
+    .select("id, drawing_data, drawer_wallet_address")
+    .eq("session_id", sessionId)
+    .gt("id", lastId)
+    .order("id", { ascending: true })
+
+  if (error) {
+    console.error("Failed to fetch new drawings:", error)
+    return []
+  }
+  return data as Drawing[]
 }
