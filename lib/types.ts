@@ -12,7 +12,6 @@ export type Drawing = {
     color: string
     lineWidth: number
   }
-  is_first_segment?: boolean // Flag for the start of a new stroke
 }
 
 export type UserData = {

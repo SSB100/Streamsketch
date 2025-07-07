@@ -203,29 +203,20 @@ export async function getSessionData(shortCode: string) {
   return result
 }
 
-export async function spendDrawingCredit(drawerWalletAddress: string, sessionId: string) {
-  return timeAsync("spendDrawingCredit", async () => {
-    const supabase = createSupabaseAdminClient()
-
-    try {
-      const { error } = await supabase.rpc("spend_credit_and_draw", {
-        p_drawer_wallet_address: drawerWalletAddress,
-        p_session_id: sessionId,
-      })
-
-      if (error) {
-        console.error("[StreamSketch] Credit spend failed:", error.message)
-        return { success: false, error: error.message }
-      }
-
-      // Clear cache after spending credit (but don't wait for it)
-      setTimeout(() => userDataCache.delete(drawerWalletAddress), 0)
-      return { success: true }
-    } catch (error: any) {
-      console.error("[StreamSketch] Credit spend error:", error?.message ?? error)
-      return { success: false, error: error?.message ?? "Unknown error" }
-    }
+export async function spendDrawingCredit(sessionId: string, drawerWalletAddress: string) {
+  const supabase = createSupabaseAdminClient()
+  const { data, error } = await supabase.rpc("spend_credit_and_draw", {
+    p_session_id: sessionId,
+    p_drawer_wallet_address: drawerWalletAddress,
   })
+
+  if (error) {
+    console.error("Error spending credit:", error)
+    return { success: false, error: error.message, newCredits: 0 }
+  }
+
+  userDataCache.delete(drawerWalletAddress)
+  return { success: true, newCredits: data }
 }
 
 export async function processCreditPurchase(
@@ -646,4 +637,14 @@ export async function getNewDrawings(sessionId: string, lastId: number) {
     return []
   }
   return data as Drawing[]
+}
+
+export async function broadcastDrawings(sessionId: string, walletAddress: string, segments: unknown[]) {
+  console.log(`[broadcastDrawings] session=${sessionId} wallet=${walletAddress} segments=${segments.length}`)
+  return { success: true }
+}
+
+export async function broadcastNuke(sessionId: string, nukerWallet: string | null, nukeName: string) {
+  console.log(`[broadcastNuke] session=${sessionId} nuker=${nukerWallet} nuke=${nukeName}`)
+  return { success: true }
 }

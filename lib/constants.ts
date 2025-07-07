@@ -14,3 +14,7 @@ export const LINES_PER_PURCHASE = 10
 // Revenue Distribution
 export const STREAMER_REVENUE_SHARE = 0.8 // 80% for the host
 export const APP_REVENUE_SHARE = 0.2 // 20% for Haaker (the platform)
+
+// Default drawing settings
+export const DEFAULT_COLOR = "#FFFFFF" // white
+export const DEFAULT_LINE_WIDTH = 5 // pixels

@@ -1,85 +1,67 @@
 "use client"
 
-import { useEffect, useState, useCallback, useRef, useMemo } from "react"
+import { useEffect, useState, useRef, useCallback, useMemo } from "react"
 import { useConnection, useWallet } from "@solana/wallet-adapter-react"
 import { SystemProgram, Transaction, LAMPORTS_PER_SOL } from "@solana/web3.js"
-import type { Drawing } from "@/lib/types"
+import { toast } from "sonner"
+import { throttle } from "lodash"
+
+import type { Drawing, UserData } from "@/lib/types"
 import { Canvas, type CanvasHandle } from "@/components/whiteboard/canvas"
 import { ColorPicker } from "@/components/whiteboard/color-picker"
 import { BrushSizePicker } from "@/components/whiteboard/brush-size-picker"
-import { PurchaseCredits } from "@/components/dashboard/purchase-credits"
 import { NukeSelectionDialog } from "@/components/whiteboard/nuke-selection-dialog"
 import { NukeAnimationOverlay } from "@/components/whiteboard/nuke-animation-overlay"
+import { Button } from "@/components/ui/button"
 import { useRealtimeChannel } from "@/hooks/use-realtime-channel"
 import {
   getSessionData,
-  spendDrawingCredit,
   getUserData,
-  processNukePurchase,
+  spendDrawingCredit,
   addDrawingSegments,
-  getFreeCreditsForSession,
+  broadcastNuke,
+  processNukePurchase,
+  triggerFreeNukeAction,
+  broadcastDrawings,
 } from "@/app/actions"
-import { Rocket, Edit, Bomb } from "lucide-react"
-import { toast } from "sonner"
-import { Button } from "@/components/ui/button"
-import {
-  Dialog,
-  DialogTrigger,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from "@/components/ui/dialog"
+import { DEFAULT_COLOR, DEFAULT_LINE_WIDTH, APP_WALLET_ADDRESS } from "@/lib/constants"
 import type { NukeAnimation } from "@/lib/nuke-animations"
-import { APP_WALLET_ADDRESS } from "@/lib/constants"
-import { useFreeNukeAction } from "@/hooks/use-free-nuke-action"
-import { ErrorBoundary } from "@/components/error-boundary"
+import { Bomb, Loader2, Coins, Plus } from "lucide-react"
+import { PurchaseCreditsDialog } from "@/components/whiteboard/purchase-credits-dialog"
 
-type DrawingSegment = Omit<Drawing, "id" | "is_first_segment"> & { is_first_segment?: boolean }
-
-const BROADCAST_INTERVAL_MS = 200
-const DRAWING_TIME_LIMIT_MS = 5000
-
-function DrawPageContent({ params }: { params: { code: string } }) {
-  const { publicKey, sendTransaction, wallet } = useWallet()
+export default function DrawPage({ params }: { params: { code: string } }) {
+  const { publicKey, sendTransaction } = useWallet()
   const { connection } = useConnection()
-  const freeNukeAction = useFreeNukeAction()
 
-  const [session, setSession] = useState<{ id: string; owner_wallet_address: string } | null>(null)
+  const [session, setSession] = useState<{ id: string } | null>(null)
   const [initialDrawings, setInitialDrawings] = useState<Drawing[]>([])
-  const [credits, setCredits] = useState({
-    paidLines: 0,
-    freeLines: 0,
-    freeNukes: 0,
-    username: null as string | null,
-  })
   const [isLoading, setIsLoading] = useState(true)
-  const [isNukeDialogOpen, setIsNukeDialogOpen] = useState(false)
+  const [isDrawing, setIsDrawing] = useState(false)
+  const [color, setColor] = useState(DEFAULT_COLOR)
+  const [lineWidth, setLineWidth] = useState(DEFAULT_LINE_WIDTH)
   const [nukeEvent, setNukeEvent] = useState<{ username: string | null; animationId: string } | null>(null)
-  const [color, setColor] = useState("#FFFFFF")
-  const [brushSize, setBrushSize] = useState(5)
+  const [userData, setUserData] = useState<UserData | null>(null)
+  const [isNukeDialogOpen, setIsNukeDialogOpen] = useState(false)
+  const [isPurchaseDialogOpen, setIsPurchaseDialogOpen] = useState(false)
 
   const canvasRef = useRef<CanvasHandle>(null)
-  const broadcastBufferRef = useRef<DrawingSegment[]>([])
-  const currentStrokeRef = useRef<DrawingSegment[]>([])
-  const broadcastIntervalRef = useRef<NodeJS.Timeout | null>(null)
-  const drawingTimeoutRef = useRef<NodeJS.Timeout | null>(null)
-  const isFirstSegmentOfStroke = useRef(true)
-  const creditSpentRef = useRef(false)
+  const drawingBuffer = useRef<Omit<Drawing, "drawer_wallet_address" | "id">[]>([])
+  const isSpendingCreditRef = useRef(false)
 
-  const sessionRef = useRef(session)
-  useEffect(() => {
-    sessionRef.current = session
-  }, [session])
+  const refreshUserData = useCallback(async () => {
+    if (!publicKey) return
+    try {
+      const data = await getUserData(publicKey.toBase58())
+      setUserData(data)
+    } catch (error) {
+      console.error("Failed to refresh user data:", error)
+      toast.error("Could not update your credit balance.")
+    }
+  }, [publicKey])
 
-  const handleIncomingDrawBatch = useCallback(
-    ({ segments }: { segments: Drawing[] }) => {
-      if (segments.length > 0 && segments[0]?.drawer_wallet_address !== publicKey?.toBase58()) {
-        canvasRef.current?.drawBatchFromBroadcast(segments)
-      }
-    },
-    [publicKey],
-  )
+  const handleIncomingDrawBatch = useCallback(({ segments }: { segments: Drawing[] }) => {
+    canvasRef.current?.drawBatchFromBroadcast(segments)
+  }, [])
 
   const handleIncomingNuke = useCallback(
     ({ username, animationId }: { username: string | null; animationId: string }) => {
@@ -90,168 +72,155 @@ function DrawPageContent({ params }: { params: { code: string } }) {
   )
 
   const channelOptions = useMemo(
-    () => ({ onDrawBatchBroadcast: handleIncomingDrawBatch, onNukeBroadcast: handleIncomingNuke }),
+    () => ({
+      onDrawBatchBroadcast: handleIncomingDrawBatch,
+      onNukeBroadcast: handleIncomingNuke,
+    }),
     [handleIncomingDrawBatch, handleIncomingNuke],
   )
-  const channel = useRealtimeChannel(session?.id ?? null, channelOptions)
 
-  const refreshUserData = useCallback(async () => {
-    if (!publicKey || !sessionRef.current) return
-    try {
-      const [paidData, freeData] = await Promise.all([
-        getUserData(publicKey.toBase58()),
-        getFreeCreditsForSession(publicKey.toBase58(), sessionRef.current.id),
-      ])
-      setCredits({
-        paidLines: paidData.lineCredits,
-        username: paidData.username,
-        freeLines: freeData.freeLines,
-        freeNukes: freeData.freeNukes,
-      })
-    } catch (err) {
-      console.error("Failed to refresh user data:", err)
-      toast.error("Could not refresh your credit balance.")
-    }
-  }, [publicKey])
+  useRealtimeChannel(session?.id ?? null, channelOptions)
 
   useEffect(() => {
-    async function bootstrap() {
+    const fetchInitialData = async () => {
       setIsLoading(true)
       try {
-        const { session: s, drawings: d } = await getSessionData(params.code)
-        if (!s) {
-          toast.error("Session not found.")
-          setIsLoading(false)
-          return
+        const { session: sessionData, drawings } = await getSessionData(params.code)
+        if (sessionData) {
+          setSession(sessionData)
+          setInitialDrawings(drawings)
+        } else {
+          toast.error("Session not found or is inactive.")
         }
-        sessionRef.current = s as { id: string; owner_wallet_address: string }
-        setSession(s as { id: string; owner_wallet_address: string })
-        setInitialDrawings(d)
-        if (publicKey) {
-          await refreshUserData()
-        }
-      } catch (err) {
-        console.error("Bootstrap failed:", err)
-        toast.error("Failed to load session data")
+      } catch (error) {
+        console.error("Failed to fetch session data:", error)
+        toast.error("Failed to load session data.")
       } finally {
         setIsLoading(false)
       }
     }
-    bootstrap()
-  }, [params.code, publicKey, refreshUserData])
+    fetchInitialData()
+  }, [params.code])
 
-  const broadcastDrawingSegments = useCallback(() => {
-    if (broadcastBufferRef.current.length > 0 && channel) {
-      const segmentsToSend = [...broadcastBufferRef.current]
-      broadcastBufferRef.current = []
-      channel.send({ type: "broadcast", event: "draw_batch", payload: { segments: segmentsToSend } })
+  useEffect(() => {
+    if (session && publicKey) {
+      refreshUserData()
     }
-  }, [channel])
+  }, [session, publicKey, refreshUserData])
 
-  const handleDrawEnd = useCallback(() => {
-    if (broadcastIntervalRef.current) clearInterval(broadcastIntervalRef.current)
-    if (drawingTimeoutRef.current) clearTimeout(drawingTimeoutRef.current)
-    broadcastDrawingSegments()
+  const sendDrawingBuffer = useCallback(
+    throttle(async () => {
+      if (drawingBuffer.current.length === 0 || !session || !publicKey) return
 
-    if (publicKey && sessionRef.current && currentStrokeRef.current.length > 0) {
-      const strokeToSave = [...currentStrokeRef.current]
-      addDrawingSegments(sessionRef.current.id, strokeToSave).catch((err) => {
-        console.error("Failed to save drawing stroke:", err)
-      })
-    }
-
-    currentStrokeRef.current = []
-    creditSpentRef.current = false
-  }, [broadcastDrawingSegments, publicKey])
-
-  const handleDrawStart = useCallback(() => {
-    if (credits.paidLines < 1 && credits.freeLines < 1) {
-      toast.error("Out of line credits!")
-      canvasRef.current?.forceStopDrawing()
-      return
-    }
-
-    isFirstSegmentOfStroke.current = true
-    creditSpentRef.current = false
-    broadcastBufferRef.current = []
-    currentStrokeRef.current = []
-
-    if (broadcastIntervalRef.current) clearInterval(broadcastIntervalRef.current)
-    broadcastIntervalRef.current = setInterval(broadcastDrawingSegments, BROADCAST_INTERVAL_MS)
-
-    if (drawingTimeoutRef.current) clearTimeout(drawingTimeoutRef.current)
-    drawingTimeoutRef.current = setTimeout(() => {
-      toast.info("Drawing time limit reached (5 seconds).")
-      canvasRef.current?.forceStopDrawing()
-    }, DRAWING_TIME_LIMIT_MS)
-  }, [credits.paidLines, credits.freeLines, broadcastDrawingSegments])
-
-  const handleDraw = useCallback(
-    async (drawing: Omit<Drawing, "drawer_wallet_address" | "id">) => {
-      if (!publicKey || !sessionRef.current) return
-
-      const newSegment: DrawingSegment = {
-        ...drawing,
+      const segmentsToBroadcast = drawingBuffer.current.map((d) => ({
+        ...d,
         drawer_wallet_address: publicKey.toBase58(),
-        is_first_segment: isFirstSegmentOfStroke.current,
+      }))
+      const segmentsToSave = [...drawingBuffer.current]
+      drawingBuffer.current = []
+
+      try {
+        await Promise.all([
+          broadcastDrawings(
+            session.id,
+            publicKey.toBase58(),
+            segmentsToBroadcast.map((s) => s.drawing_data),
+          ),
+          addDrawingSegments(
+            session.id,
+            segmentsToSave.map((s) => ({ drawing_data: s.drawing_data, drawer_wallet_address: publicKey.toBase58() })),
+          ),
+        ])
+      } catch (error) {
+        console.error("Failed to send drawings:", error)
+        toast.error("Failed to send drawing.")
+        drawingBuffer.current = [...segmentsToSave, ...drawingBuffer.current]
       }
-      broadcastBufferRef.current.push(newSegment)
-      currentStrokeRef.current.push(newSegment)
-
-      if (isFirstSegmentOfStroke.current && !creditSpentRef.current) {
-        isFirstSegmentOfStroke.current = false
-        creditSpentRef.current = true
-
-        setCredits((p) => ({
-          ...p,
-          freeLines: p.freeLines > 0 ? p.freeLines - 1 : 0,
-          paidLines: p.freeLines > 0 ? p.paidLines : p.paidLines - 1,
-        }))
-
-        spendDrawingCredit(publicKey.toBase58(), sessionRef.current.id).then((res) => {
-          if (!res.success) {
-            console.error("Failed to spend credit:", res.error)
-            toast.error("Credit spend failed, refreshing balance.")
-            refreshUserData()
-          }
-        })
-      }
-    },
-    [publicKey, refreshUserData],
+    }, 200),
+    [session, publicKey],
   )
 
-  const handleNuke = async (animation: NukeAnimation) => {
-    if (!publicKey || !wallet || !sendTransaction || !sessionRef.current || !channel) {
-      toast.error("Wallet not fully connected or session invalid.")
+  const handleDrawStart = useCallback(async () => {
+    if (!publicKey || !session || !userData || isSpendingCreditRef.current) return
+
+    const totalCredits = (userData.lineCredits || 0) + (userData.totalFreeLines || 0)
+    if (totalCredits <= 0) {
+      toast.error("Out of line credits! Purchase more in the dashboard.")
       return
     }
 
-    if (animation.id === "free_nuke") {
-      try {
-        const result = await freeNukeAction(publicKey.toBase58(), sessionRef.current.id)
-        if (!result.success) {
-          toast.error("Failed to use free nuke.", { description: result.error })
-          return
-        }
+    setIsDrawing(true)
+    isSpendingCreditRef.current = true
 
-        toast.success("Nuking the board with a free credit!")
-        const usernameForBroadcast = credits.username
-        channel.send({
-          type: "broadcast",
-          event: "nuke",
-          payload: { username: usernameForBroadcast, animationId: animation.id },
-        })
-        canvasRef.current?.clearCanvas()
-        setNukeEvent({ username: usernameForBroadcast, animationId: animation.id })
-        setIsNukeDialogOpen(false)
-        setCredits((p) => ({ ...p, freeNukes: p.freeNukes - 1 }))
+    try {
+      const { success, error } = await spendDrawingCredit(session.id, publicKey.toBase58())
+      if (success) {
+        await refreshUserData()
+      } else {
+        toast.error("Failed to use credit", { description: error })
+        setIsDrawing(false)
+        canvasRef.current?.forceStopDrawing()
+      }
+    } catch (error: any) {
+      toast.error("An error occurred", { description: error.message })
+      setIsDrawing(false)
+      canvasRef.current?.forceStopDrawing()
+    } finally {
+      isSpendingCreditRef.current = false
+    }
+  }, [publicKey, session, userData, refreshUserData])
+
+  const handleDraw = useCallback(
+    (drawing: Omit<Drawing, "drawer_wallet_address" | "id">) => {
+      if (!isDrawing) return
+      drawingBuffer.current.push(drawing)
+      sendDrawingBuffer()
+    },
+    [isDrawing, sendDrawingBuffer],
+  )
+
+  const handleDrawEnd = useCallback(() => {
+    sendDrawingBuffer.flush()
+    setIsDrawing(false)
+  }, [sendDrawingBuffer])
+
+  const handleNuke = async (animation: NukeAnimation) => {
+    if (!publicKey || !session || !userData) {
+      toast.error("Cannot perform nuke. Wallet or session not ready.")
+      return
+    }
+
+    setIsNukeDialogOpen(false)
+
+    // Handle Free Nuke
+    if (animation.id === "free_nuke") {
+      if (userData.totalFreeNukes <= 0) {
+        toast.error("You don't have any free nukes for this session.")
+        return
+      }
+      const toastId = toast.loading("Using free nuke...")
+      try {
+        const result = await triggerFreeNukeAction(publicKey.toBase58(), session.id)
+        if (result.success) {
+          await broadcastNuke(session.id, userData.username, animation.id)
+          toast.success("Nuke successful!", { id: toastId })
+          refreshUserData()
+        } else {
+          toast.error("Free nuke failed", { id: toastId, description: result.error })
+        }
       } catch (error: any) {
-        console.error("Free nuke error:", error)
-        toast.error("Failed to use free nuke.", { description: error.message })
+        toast.error("An error occurred", { id: toastId, description: error.message })
       }
       return
     }
 
+    // Handle Paid Nuke
+    if (!sendTransaction) {
+      toast.error("Wallet does not support sending transactions.")
+      return
+    }
+
+    const toastId = toast.loading("Preparing nuke transaction...")
     try {
       const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed")
       const transaction = new Transaction({ feePayer: publicKey, blockhash, lastValidBlockHeight }).add(
@@ -262,109 +231,116 @@ function DrawPageContent({ params }: { params: { code: string } }) {
         }),
       )
 
+      toast.loading("Please approve the transaction in your wallet...", { id: toastId })
       const signature = await sendTransaction(transaction, connection)
-      toast.info("Transaction sent! Awaiting confirmation...")
+      toast.loading("Confirming transaction...", { id: toastId })
 
       await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, "confirmed")
-      toast.success("Payment confirmed! Nuking the board...")
+      toast.loading("Processing nuke...", { id: toastId })
 
-      const usernameForBroadcast = credits.username
-      channel.send({
-        type: "broadcast",
-        event: "nuke",
-        payload: { username: usernameForBroadcast, animationId: animation.id },
-      })
-      canvasRef.current?.clearCanvas()
-      setNukeEvent({ username: usernameForBroadcast, animationId: animation.id })
-      setIsNukeDialogOpen(false)
+      await processNukePurchase(publicKey.toBase58(), session.id, animation, signature)
+      await broadcastNuke(session.id, userData.username, animation.id)
 
-      processNukePurchase(publicKey.toBase58(), sessionRef.current.id, animation, signature).catch((err) => {
-        console.error("Background nuke processing failed:", err)
-        toast.warning("Nuke successful, but there was a server issue. Please contact support.", { duration: 10000 })
-      })
+      toast.success("Nuke successful!", { id: toastId })
+      refreshUserData()
     } catch (error: any) {
       console.error("Nuke purchase failed", error)
-      toast.error("Nuke purchase failed", { description: error.message, duration: 6000 })
+      toast.error("Nuke failed", { id: toastId, description: error.message, duration: 6000 })
     }
   }
 
-  if (isLoading)
-    return <div className="flex h-screen w-full items-center justify-center bg-deep-space text-white">Loading…</div>
-  if (!session)
+  const CreditsDisplay = () => (
+    <div className="flex items-center gap-2 rounded-full bg-black/50 px-2 py-2 text-white backdrop-blur-sm">
+      <div className="flex items-center gap-2 border-r border-white/20 pr-3">
+        <Coins className="h-5 w-5 text-yellow-400" />
+        <span className="font-bold">
+          {userData ? (
+            `${((userData.lineCredits || 0) + (userData.totalFreeLines || 0)).toLocaleString()}`
+          ) : (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          )}
+        </span>
+        <span className="text-sm text-muted-foreground">credits</span>
+      </div>
+      <Button
+        size="sm"
+        variant="ghost"
+        className="rounded-full hover:bg-white/10"
+        onClick={() => setIsPurchaseDialogOpen(true)}
+      >
+        <Plus className="mr-1 h-4 w-4" />
+        Buy
+      </Button>
+    </div>
+  )
+
+  if (isLoading) {
+    return <div className="flex h-screen w-full items-center justify-center bg-deep-space text-white">Loading...</div>
+  }
+
+  if (!session) {
     return (
       <div className="flex h-screen w-full items-center justify-center bg-deep-space text-white">
-        Session not found.
+        Session not found or is inactive.
       </div>
     )
+  }
+
+  if (!publicKey) {
+    return (
+      <div className="flex h-screen w-full items-center justify-center bg-deep-space text-white">
+        Please connect your wallet to draw.
+      </div>
+    )
+  }
 
   return (
-    <main className="flex h-screen flex-col items-center justify-center bg-deep-space gap-4 p-4">
+    <main className="relative flex h-screen w-full flex-col items-center justify-center overflow-hidden bg-deep-space p-4">
       <NukeAnimationOverlay nukeEvent={nukeEvent} />
-      <div className="absolute left-4 top-4 flex items-center gap-2 rounded-full bg-black/50 px-4 py-2 text-white">
-        <Edit className="h-5 w-5 text-neon-pink" />
-        <span className="font-bold">DRAWING MODE</span>
+      <div className="relative w-full max-w-full h-full max-h-full aspect-[16/9]">
+        <Canvas
+          ref={canvasRef}
+          width={1280}
+          height={720}
+          isDrawable={true}
+          initialDrawings={initialDrawings}
+          onDraw={handleDraw}
+          onDrawStart={handleDrawStart}
+          onDrawEnd={handleDrawEnd}
+          color={color}
+          lineWidth={lineWidth}
+          className="h-full w-full"
+        />
       </div>
-      <Canvas
-        ref={canvasRef}
-        width={1280}
-        height={720}
-        isDrawable={!!publicKey}
-        initialDrawings={initialDrawings}
-        onDrawStart={handleDrawStart}
-        onDraw={handleDraw}
-        onDrawEnd={handleDrawEnd}
-        color={color}
-        lineWidth={brushSize}
-      />
-      <div className="flex w-full max-w-[1280px] items-center justify-between rounded-lg bg-deep-space/50 p-2">
-        <div className="flex items-center gap-4">
-          <ColorPicker selectedColor={color} onColorChange={setColor} />
-          <BrushSizePicker size={brushSize} onSizeChange={setBrushSize} />
-        </div>
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2 rounded-full bg-gray-800 px-4 py-2 text-white">
-            <Rocket className="h-5 w-5 text-neon-pink" />
-            <span className="font-bold">{credits.paidLines + credits.freeLines}</span>
-            {credits.freeLines > 0 && <span className="text-xs text-green-400">({credits.freeLines} free)</span>}
-          </div>
-          <Button
-            variant="destructive"
-            className="bg-neon-cyan text-white hover:bg-neon-cyan/90"
-            onClick={() => setIsNukeDialogOpen(true)}
-          >
-            <Bomb className="mr-2 h-4 w-4" />
-            Nuke Board
-          </Button>
-          <Dialog>
-            <DialogTrigger asChild>
-              <Button className="bg-neon-pink text-white hover:bg-neon-pink/90">Buy Lines</Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-3xl border-border/40 bg-deep-space">
-              <DialogHeader>
-                <DialogTitle>Purchase Line Credits</DialogTitle>
-                <DialogDescription>
-                  Purchase line credits using SOL to continue interacting with the board.
-                </DialogDescription>
-              </DialogHeader>
-              <PurchaseCredits onPurchaseSuccess={refreshUserData} />
-            </DialogContent>
-          </Dialog>
-        </div>
+
+      <div className="absolute left-4 top-4 flex items-center gap-2">
+        <CreditsDisplay />
       </div>
+
+      <div className="absolute bottom-4 flex items-center gap-4 rounded-full bg-black/50 p-2 backdrop-blur-sm">
+        <ColorPicker selectedColor={color} onColorChange={setColor} />
+        <BrushSizePicker size={lineWidth} onSizeChange={setLineWidth} />
+        <Button
+          variant="destructive"
+          size="icon"
+          className="h-12 w-12 rounded-full"
+          onClick={() => setIsNukeDialogOpen(true)}
+        >
+          <Bomb className="h-6 w-6" />
+        </Button>
+      </div>
+
       <NukeSelectionDialog
         isOpen={isNukeDialogOpen}
         onOpenChange={setIsNukeDialogOpen}
         onNuke={handleNuke}
-        freeNukeCount={credits.freeNukes}
+        freeNukeCount={userData?.totalFreeNukes ?? 0}
+      />
+      <PurchaseCreditsDialog
+        isOpen={isPurchaseDialogOpen}
+        onOpenChange={setIsPurchaseDialogOpen}
+        onPurchaseSuccess={refreshUserData}
       />
     </main>
-  )
-}
-
-export default function DrawPage({ params }: { params: { code: string } }) {
-  return (
-    <ErrorBoundary>
-      <DrawPageContent params={params} />
-    </ErrorBoundary>
   )
 }

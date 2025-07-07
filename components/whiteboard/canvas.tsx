@@ -4,6 +4,7 @@ import type React from "react"
 import { useRef, useEffect, forwardRef, useImperativeHandle, useCallback } from "react"
 import type { Point, Drawing } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { groupBy } from "lodash"
 
 interface CanvasProps {
   width: number
@@ -20,7 +21,6 @@ interface CanvasProps {
 
 export interface CanvasHandle {
   clearCanvas: () => void
-  drawFromBroadcast: (drawing: Drawing) => void
   drawBatchFromBroadcast: (drawings: Drawing[]) => void
   forceStopDrawing: () => void
 }
@@ -64,30 +64,57 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(
     }, [])
 
     const drawLine = useCallback(
-      (from: Point, to: Point, lineColor: string, lineW: number) => {
+      (from: Point, to: Point) => {
         const ctx = getCanvasContext()
         if (!ctx) return
         ctx.beginPath()
         ctx.moveTo(from.x, from.y)
         ctx.lineTo(to.x, to.y)
-        ctx.strokeStyle = lineColor
-        ctx.lineWidth = lineW
+        ctx.strokeStyle = color
+        ctx.lineWidth = lineWidth
         ctx.stroke()
       },
-      [getCanvasContext],
+      [getCanvasContext, color, lineWidth],
     )
 
     const performDraw = useCallback(() => {
       if (!pendingDrawRef.current || !lastPointRef.current) return
+
       const currentPoint = pendingDrawRef.current
-      drawLine(lastPointRef.current, currentPoint, color, lineWidth)
+      drawLine(lastPointRef.current, currentPoint)
+
       onDraw({
         drawing_data: { from: lastPointRef.current, to: currentPoint, color, lineWidth },
       })
+
       lastPointRef.current = currentPoint
       pendingDrawRef.current = null
       animationFrameRef.current = null
     }, [color, lineWidth, onDraw, drawLine])
+
+    const drawBatch = useCallback(
+      (drawings: Drawing[]) => {
+        const ctx = getCanvasContext()
+        if (!ctx || drawings.length === 0) return
+
+        // Group by color and line width for efficiency
+        const batches = groupBy(drawings, (d) => `${d.drawing_data.color}-${d.drawing_data.lineWidth}`)
+
+        for (const key in batches) {
+          const batch = batches[key]
+          const { color: batchColor, lineWidth: batchLineWidth } = batch[0].drawing_data
+          ctx.beginPath()
+          ctx.strokeStyle = batchColor
+          ctx.lineWidth = batchLineWidth
+          batch.forEach((d) => {
+            ctx.moveTo(d.drawing_data.from.x, d.drawing_data.from.y)
+            ctx.lineTo(d.drawing_data.to.x, d.drawing_data.to.y)
+          })
+          ctx.stroke()
+        }
+      },
+      [getCanvasContext],
+    )
 
     useImperativeHandle(ref, () => ({
       clearCanvas: () => {
@@ -96,48 +123,8 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(
           ctx.clearRect(0, 0, width, height)
         }
       },
-      drawFromBroadcast: (drawing: Drawing) => {
-        const { from, to, color: lineColor, lineWidth: lineW } = drawing.drawing_data
-        drawLine(from, to, lineColor, lineW)
-      },
       drawBatchFromBroadcast: (drawings: Drawing[]) => {
-        const ctx = getCanvasContext()
-        if (!ctx || drawings.length === 0) return
-
-        const styleGroups: { style: string; drawings: Drawing[] }[] = []
-        if (drawings.length > 0) {
-          let currentGroup = {
-            style: `${drawings[0].drawing_data.color}-${drawings[0].drawing_data.lineWidth}`,
-            drawings: [],
-          }
-          styleGroups.push(currentGroup)
-
-          for (const d of drawings) {
-            const styleKey = `${d.drawing_data.color}-${d.drawing_data.lineWidth}`
-            if (styleKey !== currentGroup.style) {
-              currentGroup = { style: styleKey, drawings: [d] }
-              styleGroups.push(currentGroup)
-            } else {
-              currentGroup.drawings.push(d)
-            }
-          }
-        }
-
-        for (const group of styleGroups) {
-          if (group.drawings.length === 0) continue
-          const firstDrawing = group.drawings[0]
-          const { color, lineWidth } = firstDrawing.drawing_data
-          ctx.strokeStyle = color
-          ctx.lineWidth = lineWidth
-          ctx.beginPath()
-          for (const drawing of group.drawings) {
-            if (drawing.is_first_segment) {
-              ctx.moveTo(drawing.drawing_data.from.x, drawing.drawing_data.from.y)
-            }
-            ctx.lineTo(drawing.drawing_data.to.x, drawing.drawing_data.to.y)
-          }
-          ctx.stroke()
-        }
+        drawBatch(drawings)
       },
       forceStopDrawing: () => {
         if (isDrawingRef.current) {
@@ -154,14 +141,8 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(
     }))
 
     useEffect(() => {
-      const ctx = getCanvasContext()
-      if (!ctx) return
-      ctx.clearRect(0, 0, width, height)
-      if (initialDrawings.length > 0) {
-        const handle = ref as React.RefObject<CanvasHandle>
-        handle.current?.drawBatchFromBroadcast(initialDrawings)
-      }
-    }, [initialDrawings, width, height, getCanvasContext, ref])
+      drawBatch(initialDrawings)
+    }, [initialDrawings, drawBatch])
 
     const getPoint = useCallback((e: React.MouseEvent | React.TouchEvent): Point | null => {
       if (!canvasRef.current) return null

@@ -10,7 +10,7 @@ import { Copy, Eye, Maximize, Minimize } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 
-const POLLING_INTERVAL_MS = 5000
+const POLLING_INTERVAL_MS = 5000 // Check for updates every 5 seconds
 
 export default function ViewPage({ params }: { params: { code: string } }) {
   const [session, setSession] = useState<{ id: string } | null>(null)
@@ -39,7 +39,7 @@ export default function ViewPage({ params }: { params: { code: string } }) {
     ({ username, animationId }: { username: string | null; animationId: string }) => {
       lastRealtimeEventTimestamp.current = Date.now()
       canvasRef.current?.clearCanvas()
-      lastDrawingIdRef.current = 0
+      lastDrawingIdRef.current = 0 // Reset on nuke
       setNukeEvent({ username, animationId })
     },
     [],
@@ -79,12 +79,15 @@ export default function ViewPage({ params }: { params: { code: string } }) {
     fetchInitialData()
   }, [params.code])
 
+  // Fallback polling for data synchronization
   useEffect(() => {
     if (!session?.id) return
+
     const intervalId = setInterval(async () => {
       if (Date.now() - lastRealtimeEventTimestamp.current < POLLING_INTERVAL_MS * 2) {
         return
       }
+
       console.log("[Polling] Checking for missed drawings...")
       try {
         const newDrawings = await getNewDrawings(session.id, lastDrawingIdRef.current)
@@ -97,12 +100,14 @@ export default function ViewPage({ params }: { params: { code: string } }) {
         console.error("Polling failed:", error)
       }
     }, POLLING_INTERVAL_MS)
+
     return () => clearInterval(intervalId)
   }, [session?.id])
 
   const toggleFullscreen = () => {
     const elem = fullscreenContainerRef.current
     if (!elem) return
+
     if (!document.fullscreenElement) {
       elem.requestFullscreen().catch((err) => {
         toast.error(`Error attempting to enable full-screen mode: ${err.message} (${err.name})`)
