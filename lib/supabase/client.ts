@@ -13,6 +13,7 @@ let isInitializing = false
 export function createSupabaseBrowserClient(): SupabaseClient {
   // Always return existing client if it exists
   if (globalClient) {
+    // return globalClient // REMOVE console.log
     return globalClient
   }
 

@@ -27,11 +27,11 @@ export default function ViewPage({ params }: { params: { code: string } }) {
   const handleIncomingDrawBatch = useCallback(({ segments }: { segments: Drawing[] }) => {
     lastRealtimeEventTimestamp.current = Date.now()
     if (segments.length > 0) {
+      // Draw the segments immediately for real-time feel
       canvasRef.current?.drawBatchFromBroadcast(segments)
-      const maxId = Math.max(...segments.map((s) => s.id))
-      if (maxId > lastDrawingIdRef.current) {
-        lastDrawingIdRef.current = maxId
-      }
+      // NOTE: We do NOT update lastDrawingIdRef here.
+      // The polling mechanism remains the source of truth for synchronization,
+      // while broadcast provides the instant visual update.
     }
   }, [])
 
@@ -84,15 +84,16 @@ export default function ViewPage({ params }: { params: { code: string } }) {
     if (!session?.id) return
 
     const intervalId = setInterval(async () => {
-      if (Date.now() - lastRealtimeEventTimestamp.current < POLLING_INTERVAL_MS * 2) {
+      // Only poll if there has been no real-time activity for a while
+      if (Date.now() - lastRealtimeEventTimestamp.current < POLLING_INTERVAL_MS) {
         return
       }
 
-      console.log("[Polling] Checking for missed drawings...")
+      console.log("[Polling] Real-time quiet, checking for missed drawings...")
       try {
         const newDrawings = await getNewDrawings(session.id, lastDrawingIdRef.current)
         if (newDrawings.length > 0) {
-          toast.info(`Synced ${newDrawings.length} missed drawings.`)
+          toast.info(`Synced ${newDrawings.length} missed drawings via polling.`)
           canvasRef.current?.drawBatchFromBroadcast(newDrawings)
           lastDrawingIdRef.current = Math.max(...newDrawings.map((d) => d.id))
         }

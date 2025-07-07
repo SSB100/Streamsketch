@@ -9,8 +9,8 @@ import {
   LAMPORTS_PER_SOL,
   PublicKey,
   SystemProgram,
-  Transaction,
   sendAndConfirmTransaction,
+  Transaction,
 } from "@solana/web3.js"
 import bs58 from "bs58"
 import type { NukeAnimation } from "@/lib/nuke-animations"
@@ -73,7 +73,6 @@ export async function getUserData(walletAddress: string) {
     // Check cache first with longer duration
     const cached = userDataCache.get(walletAddress)
     if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
-      console.log("[Cache] Using cached user data for", walletAddress.slice(0, 8))
       return cached.data
     }
 
@@ -110,7 +109,6 @@ export async function getUserData(walletAddress: string) {
 
       // Cache the result with longer duration
       userDataCache.set(walletAddress, { data: result, timestamp: Date.now() })
-      console.log("[Cache] Cached user data for", walletAddress.slice(0, 8))
 
       return result
     } catch (error: any) {
@@ -122,7 +120,7 @@ export async function getUserData(walletAddress: string) {
 
 // Optimized fallback function
 async function getUserDataFallback(admin: any, walletAddress: string) {
-  console.log("[Fallback] Using fast fallback queries for", walletAddress.slice(0, 8))
+  console.warn("[Fallback] Using fast fallback queries for", walletAddress.slice(0, 8))
 
   try {
     // Only get essential data in fallback for speed
@@ -172,7 +170,6 @@ export async function getSessionData(shortCode: string) {
   // Check cache first
   const cached = sessionDataCache.get(shortCode)
   if (cached && Date.now() - cached.timestamp < SESSION_CACHE_DURATION) {
-    console.log("[Cache] Using cached session data for", shortCode)
     return cached.data
   }
 
@@ -194,7 +191,7 @@ export async function getSessionData(shortCode: string) {
     .select("id, drawing_data, drawer_wallet_address")
     .eq("session_id", session.id)
     .order("id", { ascending: true })
-    .limit(500) // Reduced limit for better performance
+    .limit(1000) // Increased limit for very active sessions
 
   if (drawingsError) throw new Error(drawingsError.message)
 
@@ -238,26 +235,31 @@ export async function processCreditPurchase(
   }
 
   try {
+    console.log(`[Purchase] Verifying transaction ${txSignature} on ${rpcHost}...`)
     const connection = new Connection(rpcHost, "confirmed")
     const tx = await connection.getParsedTransaction(txSignature, { maxSupportedTransactionVersion: 0 })
 
-    if (!tx) throw new Error("Transaction not found.")
-    if (tx.meta?.err) throw new Error(`Transaction failed: ${JSON.stringify(tx.meta.err)}`)
+    if (!tx) throw new Error("Transaction not found on-chain.")
+    if (tx.meta?.err) throw new Error(`Transaction failed on-chain: ${JSON.stringify(tx.meta.err)}`)
 
     const transferInstruction = tx.transaction.message.instructions.find(
       (ix) => "parsed" in ix && ix.parsed.type === "transfer",
     ) as any
 
-    if (!transferInstruction) throw new Error("No transfer instruction found.")
+    if (!transferInstruction) throw new Error("No transfer instruction found in transaction.")
 
     const { source, destination, lamports } = transferInstruction.parsed.info
     const expectedLamports = creditPackage.price * LAMPORTS_PER_SOL
 
-    if (source !== walletAddress) throw new Error("Transaction sent from wrong wallet.")
-    if (destination !== APP_WALLET_ADDRESS.toBase58()) throw new Error("Transaction sent to wrong wallet.")
-    if (lamports < expectedLamports * 0.99) throw new Error("Incorrect amount transferred.")
+    console.log(`[Purchase] Validating transfer: ${source} -> ${destination} for ${lamports} lamports.`)
+
+    if (source !== walletAddress) throw new Error("Transaction sent from incorrect wallet.")
+    if (destination !== APP_WALLET_ADDRESS.toBase58()) throw new Error("Transaction sent to incorrect wallet.")
+    if (lamports < expectedLamports * 0.99) throw new Error("Incorrect SOL amount transferred.")
+
+    console.log("[Purchase] Transaction verified successfully.")
   } catch (error: any) {
-    console.error(`Transaction verification failed for ${txSignature}:`, error.message)
+    console.error(`[Purchase] Transaction verification failed for ${txSignature}:`, error.message)
     return { success: false, error: `Transaction verification failed: ${error.message}` }
   }
 
@@ -270,7 +272,7 @@ export async function processCreditPurchase(
   })
 
   if (creditError) {
-    console.error("Failed to grant credits:", creditError)
+    console.error("[Purchase] Failed to grant credits in DB:", creditError)
     return { success: false, error: "Failed to update credit balance. Please contact support." }
   }
 
@@ -284,7 +286,7 @@ export async function processCreditPurchase(
   })
 
   if (logError) {
-    console.error(`Credit purchase by ${walletAddress} logged incompletely (sig: ${txSignature}):`, logError)
+    console.error(`[Purchase] Credit purchase by ${walletAddress} logged incompletely (sig: ${txSignature}):`, logError)
   }
 
   userDataCache.delete(walletAddress)
@@ -394,11 +396,22 @@ export async function claimRevenueAction(walletAddress: string) {
     const appKeypair = Keypair.fromSecretKey(bs58.decode(secretKeyStr))
     const streamerPublicKey = new PublicKey(walletAddress)
 
+    // Pre-check: Ensure app wallet has enough SOL for the transfer + fees
+    const balance = await connection.getBalance(appKeypair.publicKey)
+    const requiredLamports = Math.floor(Number(claimedAmount) * LAMPORTS_PER_SOL)
+    if (balance < requiredLamports + 5000) {
+      // 5000 lamports for fee buffer
+      console.error(
+        `CRITICAL: App wallet has insufficient funds for payout. Balance: ${balance}, Required: ${requiredLamports}`,
+      )
+      return { success: false, error: "Payout service has insufficient funds. Please contact support." }
+    }
+
     const transaction = new Transaction().add(
       SystemProgram.transfer({
         fromPubkey: appKeypair.publicKey,
         toPubkey: streamerPublicKey,
-        lamports: Math.floor(Number(claimedAmount) * LAMPORTS_PER_SOL),
+        lamports: requiredLamports,
       }),
     )
 
@@ -639,12 +652,35 @@ export async function getNewDrawings(sessionId: string, lastId: number) {
   return data as Drawing[]
 }
 
-export async function broadcastDrawings(sessionId: string, walletAddress: string, segments: unknown[]) {
-  console.log(`[broadcastDrawings] session=${sessionId} wallet=${walletAddress} segments=${segments.length}`)
+export async function broadcastDrawings(sessionId: string, segments: Omit<Drawing, "id">[]) {
+  if (segments.length === 0) return { success: true }
+  const supabase = createSupabaseAdminClient()
+  const channel = supabase.channel(`session-${sessionId}`)
+  const { error } = await channel.send({
+    type: "broadcast",
+    event: "draw_batch",
+    payload: { segments },
+  })
+  if (error) {
+    console.error(`[Realtime] Failed to broadcast drawings for session ${sessionId}:`, error)
+    return { success: false, error: error.message }
+  }
   return { success: true }
 }
 
-export async function broadcastNuke(sessionId: string, nukerWallet: string | null, nukeName: string) {
-  console.log(`[broadcastNuke] session=${sessionId} nuker=${nukerWallet} nuke=${nukeName}`)
+export async function broadcastNuke(sessionId: string, nukerUsername: string | null, animationId: string) {
+  const supabase = createSupabaseAdminClient()
+  const channel = supabase.channel(`session-${sessionId}`)
+
+  const { error } = await channel.send({
+    type: "broadcast",
+    event: "nuke",
+    payload: { username: nukerUsername, animationId: animationId },
+  })
+
+  if (error) {
+    console.error(`[Realtime] Failed to broadcast nuke for session ${sessionId}:`, error)
+    return { success: false, error: error.message }
+  }
   return { success: true }
 }

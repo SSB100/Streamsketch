@@ -120,12 +120,9 @@ export default function DrawPage({ params }: { params: { code: string } }) {
       drawingBuffer.current = []
 
       try {
+        // The broadcast action now handles the payload correctly.
         await Promise.all([
-          broadcastDrawings(
-            session.id,
-            publicKey.toBase58(),
-            segmentsToBroadcast.map((s) => s.drawing_data),
-          ),
+          broadcastDrawings(session.id, segmentsToBroadcast),
           addDrawingSegments(
             session.id,
             segmentsToSave.map((s) => ({ drawing_data: s.drawing_data, drawer_wallet_address: publicKey.toBase58() })),
