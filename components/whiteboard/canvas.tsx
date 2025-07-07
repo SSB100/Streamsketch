@@ -44,7 +44,25 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(
     const lastPointRef = useRef<Point | null>(null)
     const isDrawingRef = useRef(false) // Internal state to track mouse down
 
-    const getCanvasContext = () => canvasRef.current?.getContext("2d")
+    const getCanvasContext = () => {
+      const canvas = canvasRef.current
+      if (!canvas) return null
+
+      // Get context with performance optimizations
+      const ctx = canvas.getContext("2d", {
+        alpha: false, // Disable alpha channel for better performance
+        desynchronized: true, // Allow async rendering
+        willReadFrequently: false, // We don't read pixels frequently
+      })
+
+      if (ctx) {
+        // Optimize rendering settings
+        ctx.imageSmoothingEnabled = true
+        ctx.imageSmoothingQuality = "low" // Faster rendering
+      }
+
+      return ctx
+    }
 
     const drawLine = (from: Point, to: Point, lineColor: string, lineW: number) => {
       const ctx = getCanvasContext()

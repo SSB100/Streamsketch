@@ -32,10 +32,23 @@ export function AppWalletProvider({ children }: { children: React.ReactNode }) {
     return clusterApiUrl(network)
   }, [network])
 
+  // Optimize connection settings
+  const connectionConfig = useMemo(
+    () => ({
+      commitment: "confirmed" as const,
+      confirmTransactionInitialTimeout: 60000, // 60 seconds
+      disableRetryOnRateLimit: false,
+      httpHeaders: {
+        "Content-Type": "application/json",
+      },
+    }),
+    [],
+  )
+
   const wallets = useMemo(() => [], [])
 
   return (
-    <ConnectionProvider endpoint={endpoint}>
+    <ConnectionProvider endpoint={endpoint} config={connectionConfig}>
       <WalletProvider
         wallets={wallets}
         autoConnect={true}

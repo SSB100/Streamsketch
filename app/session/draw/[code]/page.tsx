@@ -37,8 +37,43 @@ import { ErrorBoundary } from "@/components/error-boundary"
 
 type DrawingSegment = Omit<Drawing, "id">
 
-const BROADCAST_INTERVAL_MS = 50
+// Optimize broadcast interval for better performance
+const BROADCAST_INTERVAL_MS = 100 // Increased from 50ms for better performance
 const DRAWING_TIME_LIMIT_MS = 5000
+
+// Add drawing compression function
+const compressDrawingSegments = (segments: DrawingSegment[]): DrawingSegment[] => {
+  if (segments.length <= 1) return segments
+
+  const compressed: DrawingSegment[] = []
+  let currentSegment = segments[0]
+
+  for (let i = 1; i < segments.length; i++) {
+    const nextSegment = segments[i]
+
+    // If same color and line width, and points are close, skip intermediate points
+    if (
+      currentSegment.drawing_data.color === nextSegment.drawing_data.color &&
+      currentSegment.drawing_data.lineWidth === nextSegment.drawing_data.lineWidth
+    ) {
+      const distance = Math.sqrt(
+        Math.pow(nextSegment.drawing_data.from.x - currentSegment.drawing_data.to.x, 2) +
+          Math.pow(nextSegment.drawing_data.from.y - currentSegment.drawing_data.to.y, 2),
+      )
+
+      // Skip points that are very close together (< 2 pixels)
+      if (distance < 2) {
+        continue
+      }
+    }
+
+    compressed.push(currentSegment)
+    currentSegment = nextSegment
+  }
+
+  compressed.push(currentSegment)
+  return compressed
+}
 
 function DrawPageContent({ params }: { params: { code: string } }) {
   const { publicKey, sendTransaction, wallet } = useWallet()
@@ -146,7 +181,7 @@ function DrawPageContent({ params }: { params: { code: string } }) {
 
   const broadcastDrawingSegments = useCallback(() => {
     if (broadcastBufferRef.current.length > 0 && channel) {
-      const segmentsToSend = [...broadcastBufferRef.current]
+      const segmentsToSend = compressDrawingSegments([...broadcastBufferRef.current])
       broadcastBufferRef.current = []
       channel.send({ type: "broadcast", event: "draw_batch", payload: { segments: segmentsToSend } })
     }

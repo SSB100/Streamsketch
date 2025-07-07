@@ -15,6 +15,7 @@ import {
 import bs58 from "bs58"
 import type { NukeAnimation } from "@/lib/nuke-animations"
 import { PURCHASE_PACKAGES } from "@/lib/packages"
+import { timeAsync } from "@/lib/performance"
 
 async function ensureUser(walletAddress: string) {
   const admin = createSupabaseAdminClient()
@@ -109,69 +110,78 @@ export async function updateUserUsername(walletAddress: string, newUsername: str
   return { success: true }
 }
 
+// Update getUserData with performance monitoring
 export async function getUserData(walletAddress: string) {
-  const admin = createSupabaseAdminClient()
-  await ensureUser(walletAddress)
+  return timeAsync("getUserData", async () => {
+    const admin = createSupabaseAdminClient()
+    await ensureUser(walletAddress)
 
-  try {
-    // Get user data with error handling
-    const { data: userData, error: userError } = await admin
-      .from("users")
-      .select("username, line_credits_standard, line_credits_discounted")
-      .eq("wallet_address", walletAddress)
-      .single()
-
-    if (userError || !userData) {
-      console.error("[StreamSketch] Error getting user data:", userError?.message || "(unknown)")
-      throw new Error(userError?.message || "Failed to fetch user data")
-    }
-
-    // Get revenue data with error handling
-    const { data: revenueData, error: revenueError } = await admin
-      .from("revenue")
-      .select("unclaimed_sol, total_claimed_sol")
-      .eq("streamer_wallet_address", walletAddress)
-      .single()
-
-    if (revenueError && revenueError.code !== "PGRST116") {
-      console.error("[StreamSketch] Error getting revenue data:", revenueError.message)
-      throw revenueError
-    }
-
-    // Get gifting data with error handling
-    let giftingData = { lines_gifted: 0, nukes_gifted: 0 }
     try {
-      const { data: giftingResult, error: giftingError } = await admin
-        .rpc("get_gifting_limits", { p_streamer_wallet_address: walletAddress })
-        .single()
+      // Get user data with error handling
+      const { data: userData, error: userError } = await timeAsync("getUserData.userQuery", () =>
+        admin
+          .from("users")
+          .select("username, line_credits_standard, line_credits_discounted")
+          .eq("wallet_address", walletAddress)
+          .single(),
+      )
 
-      if (!giftingError && giftingResult) {
-        giftingData = {
-          lines_gifted: giftingResult.lines_gifted ?? 0,
-          nukes_gifted: giftingResult.nukes_gifted ?? 0,
-        }
+      if (userError || !userData) {
+        console.error("[StreamSketch] Error getting user data:", userError?.message || "(unknown)")
+        throw new Error(userError?.message || "Failed to fetch user data")
       }
-    } catch (err: any) {
-      console.warn("[StreamSketch] Error fetching gifting limits, using defaults:", err?.message ?? err)
-    }
 
-    // Get free credits with robust error handling
-    const { totalFreeLines, totalFreeNukes } = await getFreeCreditsTotal(admin, walletAddress)
+      // Get revenue data with error handling
+      const { data: revenueData, error: revenueError } = await timeAsync("getUserData.revenueQuery", () =>
+        admin
+          .from("revenue")
+          .select("unclaimed_sol, total_claimed_sol")
+          .eq("streamer_wallet_address", walletAddress)
+          .single(),
+      )
 
-    return {
-      lineCredits: (userData.line_credits_standard || 0) + (userData.line_credits_discounted || 0),
-      unclaimedSol: revenueData?.unclaimed_sol ?? 0,
-      totalClaimedSol: revenueData?.total_claimed_sol ?? 0,
-      username: userData.username ?? null,
-      linesGifted: giftingData.lines_gifted,
-      nukesGifted: giftingData.nukes_gifted,
-      totalFreeLines,
-      totalFreeNukes,
+      if (revenueError && revenueError.code !== "PGRST116") {
+        console.error("[StreamSketch] Error getting revenue data:", revenueError.message)
+        throw revenueError
+      }
+
+      // Get gifting data with error handling
+      let giftingData = { lines_gifted: 0, nukes_gifted: 0 }
+      try {
+        const { data: giftingResult, error: giftingError } = await timeAsync("getUserData.giftingQuery", () =>
+          admin.rpc("get_gifting_limits", { p_streamer_wallet_address: walletAddress }).single(),
+        )
+
+        if (!giftingError && giftingResult) {
+          giftingData = {
+            lines_gifted: giftingResult.lines_gifted ?? 0,
+            nukes_gifted: giftingResult.nukes_gifted ?? 0,
+          }
+        }
+      } catch (err: any) {
+        console.warn("[StreamSketch] Error fetching gifting limits, using defaults:", err?.message ?? err)
+      }
+
+      // Get free credits with robust error handling
+      const { totalFreeLines, totalFreeNukes } = await timeAsync("getUserData.freeCreditsQuery", () =>
+        getFreeCreditsTotal(admin, walletAddress),
+      )
+
+      return {
+        lineCredits: (userData.line_credits_standard || 0) + (userData.line_credits_discounted || 0),
+        unclaimedSol: revenueData?.unclaimed_sol ?? 0,
+        totalClaimedSol: revenueData?.total_claimed_sol ?? 0,
+        username: userData.username ?? null,
+        linesGifted: giftingData.lines_gifted,
+        nukesGifted: giftingData.nukes_gifted,
+        totalFreeLines,
+        totalFreeNukes,
+      }
+    } catch (error: any) {
+      console.error("[StreamSketch] getUserData failed:", error?.message ?? error)
+      throw new Error(`Failed to get user data: ${error?.message ?? "Unknown error"}`)
     }
-  } catch (error: any) {
-    console.error("[StreamSketch] getUserData failed:", error?.message ?? error)
-    throw new Error(`Failed to get user data: ${error?.message ?? "Unknown error"}`)
-  }
+  })
 }
 
 export async function getUserSessions(walletAddress: string) {
@@ -338,18 +348,21 @@ export async function getSessionData(shortCode: string) {
   return { session, drawings: drawings as Drawing[] }
 }
 
+// Add performance logging to spendDrawingCredit
 export async function spendDrawingCredit(drawerWalletAddress: string, sessionId: string, drawing: Omit<Drawing, "id">) {
-  const supabase = createSupabaseAdminClient()
+  return timeAsync("spendDrawingCredit", async () => {
+    const supabase = createSupabaseAdminClient()
 
-  const { error } = await supabase.rpc("spend_credit_and_draw", {
-    p_drawer_wallet_address: drawerWalletAddress,
-    p_drawing_data: drawing.drawing_data,
-    p_session_id: sessionId,
+    const { error } = await supabase.rpc("spend_credit_and_draw", {
+      p_drawer_wallet_address: drawerWalletAddress,
+      p_drawing_data: drawing.drawing_data,
+      p_session_id: sessionId,
+    })
+
+    if (error) return { success: false, error: error.message }
+    revalidatePath("/dashboard")
+    return { success: true }
   })
-
-  if (error) return { success: false, error: error.message }
-  revalidatePath("/dashboard")
-  return { success: true }
 }
 
 export async function claimRevenueAction(walletAddress: string) {

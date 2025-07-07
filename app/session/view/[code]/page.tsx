@@ -93,6 +93,22 @@ export default function ViewPage({ params }: { params: { code: string } }) {
     return () => clearInterval(intervalId)
   }, [params.code])
 
+  // Add memory management for drawings
+  useEffect(() => {
+    const cleanup = setInterval(() => {
+      setDrawings((prev) => {
+        // Keep only the last 1000 drawings to prevent memory issues
+        if (prev.length > 1000) {
+          console.log(`[Memory] Trimming drawings from ${prev.length} to 500`)
+          return prev.slice(-500)
+        }
+        return prev
+      })
+    }, 30000) // Check every 30 seconds
+
+    return () => clearInterval(cleanup)
+  }, [])
+
   const toggleFullscreen = () => {
     const elem = fullscreenContainerRef.current
     if (!elem) return
