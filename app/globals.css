@@ -36,12 +36,6 @@
   }
 }
 
-.bg-grid-white\/\[0\.05\] {
-  background-image: linear-gradient(to right, rgba(255, 255, 255, 0.05) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
-  background-size: 24px 24px;
-}
-
 @layer utilities {
   @keyframes nuke-flash {
     0%,
@@ -79,4 +73,22 @@
   .animate-nuke-shake {
     animation: nuke-shake 0.5s ease-in-out forwards;
   }
+  .text-balance {
+    text-wrap: balance;
+  }
+}
+
+/* Custom styles for Solana Wallet Adapter Button */
+.wallet-adapter-button-trigger {
+  background-color: #4ade80 !important; /* brand-green */
+  color: #000 !important;
+  font-weight: bold !important;
+  border-radius: 0.5rem !important;
+}
+
+.wallet-adapter-button-trigger:hover {
+  background-color: #3ac970 !important;
+}
+body {
+  font-family: Arial, Helvetica, sans-serif;
 }

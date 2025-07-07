@@ -152,15 +152,22 @@ export default function ViewPage({ params }: { params: { code: string } }) {
         <Eye className="h-5 w-5 text-green-400" />
         <span className="font-bold">STREAMER VIEW (READ-ONLY)</span>
       </div>
-      <div className="absolute right-4 top-4 flex items-center gap-2 rounded-full bg-black/50 px-4 py-2 text-white backdrop-blur-sm">
-        <span className="text-muted-foreground">Session Code:</span>
-        <span className="font-mono text-lg font-bold text-neon-pink">{params.code}</span>
-        <button
-          onClick={() => copyToClipboard(`https://streamsketch.tech/session/${params.code}/draw`)}
-          className="ml-1 transition-transform hover:scale-110"
-        >
-          <Copy className="h-4 w-4" />
-        </button>
+      <div className="absolute right-4 top-4 flex flex-col items-end gap-2">
+        <div className="rounded-full bg-black/50 px-4 py-2 text-white backdrop-blur-sm">
+          <span className="text-sm text-muted-foreground">
+            Visit StreamSketch.tech and enter session code to draw here
+          </span>
+        </div>
+        <div className="flex items-center gap-2 rounded-full bg-black/50 px-4 py-2 text-white backdrop-blur-sm">
+          <span className="text-muted-foreground">Session Code:</span>
+          <span className="font-mono text-lg font-bold text-neon-pink">{params.code}</span>
+          <button
+            onClick={() => copyToClipboard(`https://streamsketch.tech/session/draw/${params.code}`)}
+            className="ml-1 transition-transform hover:scale-110"
+          >
+            <Copy className="h-4 w-4" />
+          </button>
+        </div>
       </div>
       <div className="absolute bottom-4 right-4">
         <Button onClick={toggleFullscreen} variant="outline" size="icon" className="bg-black/50">

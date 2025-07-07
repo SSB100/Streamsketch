@@ -28,7 +28,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { PlusCircle, Loader2, Copy, Eye, Edit, Trash2 } from "lucide-react"
+import { PlusCircle, Loader2, Copy, Eye, LinkIcon, Trash2 } from "lucide-react"
 import { createSession, deleteSession } from "@/app/actions"
 import Link from "next/link"
 
@@ -96,9 +96,9 @@ export function SessionManager({ initialSessions }: SessionManagerProps) {
     }
   }
 
-  const copyToClipboard = (text: string) => {
+  const copyToClipboard = (text: string, message: string) => {
     navigator.clipboard.writeText(text)
-    toast.success("Copied to clipboard!")
+    toast.success(message)
   }
 
   return (
@@ -169,7 +169,7 @@ export function SessionManager({ initialSessions }: SessionManagerProps) {
                         variant="ghost"
                         size="icon"
                         className="h-6 w-6"
-                        onClick={() => copyToClipboard(session.short_code)}
+                        onClick={() => copyToClipboard(session.short_code, "Session code copied!")}
                       >
                         <Copy className="h-3 w-3" />
                       </Button>
@@ -187,22 +187,40 @@ export function SessionManager({ initialSessions }: SessionManagerProps) {
                   <TableCell>{new Date(session.created_at).toLocaleDateString()}</TableCell>
                   <TableCell className="text-right">
                     <div className="flex items-center justify-end gap-2">
-                      <Link href={`/session/${session.short_code}/view`} target="_blank" rel="noopener noreferrer">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="border-secondary text-secondary hover:bg-secondary/10 hover:text-secondary bg-transparent"
+                        onClick={() =>
+                          copyToClipboard(
+                            `https://streamsketch.tech/session/view/${session.short_code}`,
+                            "OBS view link copied!",
+                          )
+                        }
+                      >
+                        <Copy className="mr-1 h-3 w-3" /> Copy View Link
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="border-primary text-primary hover:bg-primary/10 hover:text-primary bg-transparent"
+                        onClick={() =>
+                          copyToClipboard(
+                            `https://streamsketch.tech/session/draw/${session.short_code}`,
+                            "Viewer draw link copied!",
+                          )
+                        }
+                      >
+                        <LinkIcon className="mr-1 h-3 w-3" /> Copy Draw Link
+                      </Button>
+                      <Link href={`/session/view/${session.short_code}`} target="_blank" rel="noopener noreferrer">
                         <Button
                           variant="outline"
-                          size="sm"
-                          className="border-secondary text-secondary hover:bg-secondary/10 hover:text-secondary bg-transparent"
+                          size="icon"
+                          className="border-secondary text-secondary hover:bg-secondary/10 hover:text-secondary bg-transparent h-9 w-9"
                         >
-                          <Eye className="mr-1 h-3 w-3" /> View
-                        </Button>
-                      </Link>
-                      <Link href={`/session/${session.short_code}/draw`} target="_blank" rel="noopener noreferrer">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="border-primary text-primary hover:bg-primary/10 hover:text-primary bg-transparent"
-                        >
-                          <Edit className="mr-1 h-3 w-3" /> Draw
+                          <Eye className="h-4 w-4" />
+                          <span className="sr-only">View Session in new tab</span>
                         </Button>
                       </Link>
                       <AlertDialog>

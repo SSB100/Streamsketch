@@ -13,10 +13,32 @@ import { Toaster } from "@/components/ui/sonner"
 import { ErrorBoundary } from "@/components/error-boundary"
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://streamsketch.tech"),
   title: "StreamSketch - Real-time Collaborative Whiteboard",
   description: "Monetize your stream with a real-time whiteboard powered by Solana.",
   icons: {
     icon: "/logo.png",
+  },
+  openGraph: {
+    title: "StreamSketch",
+    description: "Collaborative canvas for streamers on Solana.",
+    url: "https://streamsketch.tech",
+    siteName: "StreamSketch",
+    images: [
+      {
+        url: "/banner.png", // Resolves to https://streamsketch.tech/banner.png
+        width: 1200,
+        height: 630,
+      },
+    ],
+    locale: "en_US",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "StreamSketch",
+    description: "Collaborative canvas for streamers on Solana.",
+    images: ["/banner.png"], // Resolves to https://streamsketch.tech/banner.png
   },
     generator: 'v0.dev'
 }

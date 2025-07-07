@@ -59,7 +59,7 @@ export function FreeCreditsDisplay({ freeCreditSessions }: FreeCreditsDisplayPro
                   )}
                 </div>
               </div>
-              <Link href={`/session/${session.session_code}/draw`} target="_blank" rel="noopener noreferrer">
+              <Link href={`/session/draw/${session.session_code}`} target="_blank" rel="noopener noreferrer">
                 <Button
                   size="sm"
                   variant="outline"

@@ -43,8 +43,6 @@ export function NukeAnimationOverlay({ nukeEvent }: NukeAnimationOverlayProps) {
 
   return (
     <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center overflow-hidden">
-      {animation.id === "default" && <div className="absolute inset-0 animate-nuke-flash bg-red-500" />}
-
       {animation.video && (
         <video
           src={animation.video}

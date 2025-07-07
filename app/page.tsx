@@ -6,7 +6,7 @@ import { Header } from "@/components/header"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { ArrowRight, Users, Zap, Palette } from "lucide-react"
+import { ArrowRight, Users, Zap, Palette, TrendingUp } from "lucide-react"
 import { useWallet } from "@solana/wallet-adapter-react"
 import Link from "next/link"
 
@@ -18,7 +18,7 @@ export default function HomePage() {
   const handleJoinSession = (e: React.FormEvent) => {
     e.preventDefault()
     if (sessionCode.trim()) {
-      router.push(`/session/${sessionCode.trim().toUpperCase()}/draw`)
+      router.push(`/session/draw/${sessionCode.trim().toUpperCase()}`)
     }
   }
 
@@ -26,9 +26,8 @@ export default function HomePage() {
     <div className="flex min-h-screen flex-col">
       <Header />
       <main className="flex-1">
-        <section className="relative w-full overflow-hidden py-20 md:py-32 lg:py-40">
-          <div className="absolute inset-0 z-0 bg-grid-white/[0.05] [mask-image:linear-gradient(to_bottom,white_5%,transparent_90%)]"></div>
-          <div className="absolute inset-0 z-[-1] bg-gradient-to-b from-deep-space to-transparent"></div>
+        <section className="relative w-full overflow-hidden py-12 md:py-20 lg:py-24">
+          <div className="absolute inset-0 -z-10 h-full w-full bg-deep-space bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-brand-green/20 to-deep-space"></div>
           <div className="container relative z-10">
             <div className="mx-auto max-w-4xl text-center">
               <h1 className="text-6xl font-extrabold tracking-tighter text-transparent sm:text-7xl md:text-8xl lg:text-9xl bg-clip-text bg-gradient-to-r from-brand-green to-brand-teal animate-gradient-pan">
@@ -39,6 +38,30 @@ export default function HomePage() {
                 Turn your stream into a collaborative canvas. Let your viewers draw on your screen in real-time, funded
                 by micro-transactions on Solana.
               </p>
+
+              {/* Revenue Share Promotional Banner */}
+              <div className="mx-auto mt-8 max-w-2xl">
+                <div className="relative overflow-hidden rounded-2xl border-2 border-yellow-400/50 bg-gradient-to-r from-yellow-400/10 via-orange-400/10 to-yellow-400/10 p-6 shadow-2xl shadow-yellow-400/20">
+                  <div className="absolute inset-0 bg-gradient-to-r from-yellow-400/5 via-transparent to-yellow-400/5 animate-pulse"></div>
+                  <div className="relative z-10 flex items-center justify-center gap-4">
+                    <div className="flex items-center justify-center rounded-full bg-yellow-400/20 p-3">
+                      <TrendingUp className="h-8 w-8 text-yellow-400" />
+                    </div>
+                    <div className="text-left">
+                      <div className="flex items-baseline gap-2">
+                        <span className="text-5xl font-black text-yellow-400">80%</span>
+                        <span className="text-xl font-bold text-white">Revenue Share</span>
+                      </div>
+                      <p className="text-sm text-yellow-100/80 font-medium">
+                        Keep 80% of all viewer payments • Instant SOL earnings
+                      </p>
+                    </div>
+                  </div>
+                  <div className="absolute -right-4 -top-4 h-24 w-24 rounded-full bg-yellow-400/10 blur-xl"></div>
+                  <div className="absolute -bottom-4 -left-4 h-32 w-32 rounded-full bg-orange-400/10 blur-xl"></div>
+                </div>
+              </div>
+
               <div className="mt-8 flex flex-col items-center justify-center gap-4 sm:flex-row">
                 <Link href="/dashboard">
                   <Button size="lg" className="w-full bg-primary text-primary-foreground hover:bg-primary/90 sm:w-auto">
@@ -69,7 +92,7 @@ export default function HomePage() {
           </div>
         </section>
 
-        <section className="py-16 md:py-24">
+        <section className="py-6 md:py-8">
           <div className="container">
             <div className="mx-auto mb-12 max-w-2xl text-center">
               <h2 className="text-3xl font-bold tracking-tighter text-white sm:text-4xl">How It Works</h2>
