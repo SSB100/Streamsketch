@@ -243,7 +243,7 @@ function DrawPageContent({ params }: { params: { code: string } }) {
         // Spend credit in background - don't block drawing
         setTimeout(async () => {
           try {
-            const res = await spendDrawingCredit(publicKey.toBase58(), session.id, newSegment)
+            const res = await spendDrawingCredit(publicKey.toBase58(), session.id)
             if (!res.success) {
               console.error("Failed to spend credit:", res.error)
               // Refresh credits on error
@@ -256,7 +256,7 @@ function DrawPageContent({ params }: { params: { code: string } }) {
         }, 0)
       }
     },
-    [publicKey, session, credits.freeLines, refreshUserData],
+    [publicKey, session, credits.freeLines, credits.paidLines, refreshUserData],
   )
 
   const handleNuke = async (animation: NukeAnimation) => {

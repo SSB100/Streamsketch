@@ -17,7 +17,6 @@ import { toast } from "sonner"
 import { RewardManager } from "@/components/dashboard/reward-manager"
 import { ErrorBoundary } from "@/components/error-boundary"
 import { FreeCreditsDisplay } from "@/components/dashboard/free-credits-display"
-import { PerformanceDebugPanel } from "@/components/debug/performance-monitor"
 
 type UserData = {
   lineCredits: number
@@ -230,7 +229,6 @@ function DashboardContent() {
           </div>
         )}
       </div>
-      <PerformanceDebugPanel />
     </main>
   )
 }

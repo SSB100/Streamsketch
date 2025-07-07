@@ -200,15 +200,13 @@ export async function getSessionData(shortCode: string) {
 }
 
 // Optimized drawing credit spending with minimal database calls
-export async function spendDrawingCredit(drawerWalletAddress: string, sessionId: string, drawing: Omit<Drawing, "id">) {
+export async function spendDrawingCredit(drawerWalletAddress: string, sessionId: string) {
   return timeAsync("spendDrawingCredit", async () => {
     const supabase = createSupabaseAdminClient()
 
     try {
-      // Use a more efficient approach - just call the RPC without extra validation
       const { error } = await supabase.rpc("spend_credit_and_draw", {
         p_drawer_wallet_address: drawerWalletAddress,
-        p_drawing_data: drawing.drawing_data,
         p_session_id: sessionId,
       })
 
