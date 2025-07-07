@@ -1,6 +1,8 @@
 "use server"
 import { createSupabaseAdminClient } from "@/lib/supabase/admin"
 import { revalidatePath } from "next/cache"
+// ⬇️  Place this anywhere after the existing import line for revalidatePath
+export { revalidatePath }
 import type { Drawing } from "@/lib/types"
 import { STREAMER_REVENUE_SHARE, APP_WALLET_ADDRESS } from "@/lib/constants"
 import {
@@ -199,12 +201,13 @@ export async function getSessionData(shortCode: string) {
   return result
 }
 
-// Optimized drawing credit spending with minimal database calls
+// CORRECTED: This function now matches the signature of the refactored RPC function.
 export async function spendDrawingCredit(drawerWalletAddress: string, sessionId: string) {
   return timeAsync("spendDrawingCredit", async () => {
     const supabase = createSupabaseAdminClient()
 
     try {
+      // CORRECTED: The RPC call no longer sends drawing_data, matching the database function.
       const { error } = await supabase.rpc("spend_credit_and_draw", {
         p_drawer_wallet_address: drawerWalletAddress,
         p_session_id: sessionId,

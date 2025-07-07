@@ -1,14 +1,27 @@
-import { createClient } from "@supabase/supabase-js"
+import { createServerClient } from "@supabase/ssr"
 
-// ❶ Admin client – SERVER-ONLY!
-//    • Uses the service-role key (full DB privileges)
-//    • Does NOT persist a session; every call is stateless.
+/**
+ * Creates a Supabase client with service_role permissions.
+ * This should ONLY be used on the server (in Server Actions and Route Handlers)
+ * where you need to bypass RLS.
+ *
+ * @returns A Supabase client with admin privileges.
+ */
 export function createSupabaseAdminClient() {
-  return createClient(
-    process.env.SUPABASE_SUPABASE_URL!,
-    process.env.SUPABASE_SUPABASE_SERVICE_ROLE_KEY!, // NEVER expose this key to the browser
-    {
-      auth: { persistSession: false },
+  const supabaseUrl = process.env.SUPABASE_SUPABASE_URL
+  const serviceRoleKey = process.env.SUPABASE_SUPABASE_SERVICE_ROLE_KEY
+
+  if (!supabaseUrl || !serviceRoleKey) {
+    throw new Error("Missing Supabase URL or Service Role Key for admin client.")
+  }
+
+  // We can use createServerClient here with a dummy cookie implementation
+  // as we don't need cookie-based auth when using the service_role key.
+  return createServerClient(supabaseUrl, serviceRoleKey, {
+    cookies: {},
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
     },
-  )
+  })
 }

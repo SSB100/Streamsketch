@@ -243,6 +243,7 @@ function DrawPageContent({ params }: { params: { code: string } }) {
         // Spend credit in background - don't block drawing
         setTimeout(async () => {
           try {
+            // CORRECTED: The call now only sends the required parameters.
             const res = await spendDrawingCredit(publicKey.toBase58(), session.id)
             if (!res.success) {
               console.error("Failed to spend credit:", res.error)
