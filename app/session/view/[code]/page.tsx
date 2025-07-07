@@ -10,7 +10,7 @@ import { Copy, Eye, Maximize, Minimize } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 
-const POLLING_INTERVAL_MS = 5000 // Check for updates every 5 seconds
+const POLLING_INTERVAL_MS = 5000
 
 export default function ViewPage({ params }: { params: { code: string } }) {
   const [session, setSession] = useState<{ id: string } | null>(null)
@@ -27,7 +27,7 @@ export default function ViewPage({ params }: { params: { code: string } }) {
   const handleIncomingDrawBatch = useCallback(({ segments }: { segments: Drawing[] }) => {
     lastRealtimeEventTimestamp.current = Date.now()
     if (segments.length > 0) {
-      segments.forEach((drawing) => canvasRef.current?.drawFromBroadcast(drawing))
+      canvasRef.current?.drawBatchFromBroadcast(segments)
       const maxId = Math.max(...segments.map((s) => s.id))
       if (maxId > lastDrawingIdRef.current) {
         lastDrawingIdRef.current = maxId
@@ -39,7 +39,7 @@ export default function ViewPage({ params }: { params: { code: string } }) {
     ({ username, animationId }: { username: string | null; animationId: string }) => {
       lastRealtimeEventTimestamp.current = Date.now()
       canvasRef.current?.clearCanvas()
-      lastDrawingIdRef.current = 0 // Reset on nuke
+      lastDrawingIdRef.current = 0
       setNukeEvent({ username, animationId })
     },
     [],
@@ -79,35 +79,30 @@ export default function ViewPage({ params }: { params: { code: string } }) {
     fetchInitialData()
   }, [params.code])
 
-  // Fallback polling for data synchronization
   useEffect(() => {
     if (!session?.id) return
-
     const intervalId = setInterval(async () => {
       if (Date.now() - lastRealtimeEventTimestamp.current < POLLING_INTERVAL_MS * 2) {
         return
       }
-
       console.log("[Polling] Checking for missed drawings...")
       try {
         const newDrawings = await getNewDrawings(session.id, lastDrawingIdRef.current)
         if (newDrawings.length > 0) {
           toast.info(`Synced ${newDrawings.length} missed drawings.`)
-          newDrawings.forEach((d) => canvasRef.current?.drawFromBroadcast(d))
+          canvasRef.current?.drawBatchFromBroadcast(newDrawings)
           lastDrawingIdRef.current = Math.max(...newDrawings.map((d) => d.id))
         }
       } catch (error) {
         console.error("Polling failed:", error)
       }
     }, POLLING_INTERVAL_MS)
-
     return () => clearInterval(intervalId)
   }, [session?.id])
 
   const toggleFullscreen = () => {
     const elem = fullscreenContainerRef.current
     if (!elem) return
-
     if (!document.fullscreenElement) {
       elem.requestFullscreen().catch((err) => {
         toast.error(`Error attempting to enable full-screen mode: ${err.message} (${err.name})`)

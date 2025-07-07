@@ -10,7 +10,7 @@ interface CanvasProps {
   height: number
   isDrawable: boolean
   initialDrawings?: Drawing[]
-  onDraw: (drawing: Omit<Drawing, "drawer_wallet_address">) => void
+  onDraw: (drawing: Omit<Drawing, "drawer_wallet_address" | "id">) => void
   onDrawStart: () => void
   onDrawEnd: () => void
   color?: string
@@ -21,6 +21,7 @@ interface CanvasProps {
 export interface CanvasHandle {
   clearCanvas: () => void
   drawFromBroadcast: (drawing: Drawing) => void
+  drawBatchFromBroadcast: (drawings: Drawing[]) => void
   forceStopDrawing: () => void
 }
 
@@ -49,21 +50,16 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(
     const getCanvasContext = useCallback(() => {
       const canvas = canvasRef.current
       if (!canvas) return null
-
-      // Get context with maximum performance optimizations
       const ctx = canvas.getContext("2d", {
-        alpha: false, // Disable alpha channel for better performance
-        desynchronized: true, // Allow async rendering
-        willReadFrequently: false, // We don't read pixels frequently
+        alpha: false,
+        desynchronized: true,
+        willReadFrequently: false,
       })
-
       if (ctx) {
-        // Optimize rendering settings for speed
-        ctx.imageSmoothingEnabled = false // Disable for speed
+        ctx.imageSmoothingEnabled = false
         ctx.lineCap = "round"
         ctx.lineJoin = "round"
       }
-
       return ctx
     }, [])
 
@@ -71,7 +67,6 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(
       (from: Point, to: Point, lineColor: string, lineW: number) => {
         const ctx = getCanvasContext()
         if (!ctx) return
-
         ctx.beginPath()
         ctx.moveTo(from.x, from.y)
         ctx.lineTo(to.x, to.y)
@@ -82,21 +77,13 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(
       [getCanvasContext],
     )
 
-    // Optimized drawing with requestAnimationFrame
     const performDraw = useCallback(() => {
       if (!pendingDrawRef.current || !lastPointRef.current) return
-
       const currentPoint = pendingDrawRef.current
       drawLine(lastPointRef.current, currentPoint, color, lineWidth)
-
-      // Only call onDraw occasionally to reduce overhead
-      if (Math.random() < 0.3) {
-        // Only 30% of the time
-        onDraw({
-          drawing_data: { from: lastPointRef.current, to: currentPoint, color, lineWidth },
-        })
-      }
-
+      onDraw({
+        drawing_data: { from: lastPointRef.current, to: currentPoint, color, lineWidth },
+      })
       lastPointRef.current = currentPoint
       pendingDrawRef.current = null
       animationFrameRef.current = null
@@ -112,6 +99,45 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(
       drawFromBroadcast: (drawing: Drawing) => {
         const { from, to, color: lineColor, lineWidth: lineW } = drawing.drawing_data
         drawLine(from, to, lineColor, lineW)
+      },
+      drawBatchFromBroadcast: (drawings: Drawing[]) => {
+        const ctx = getCanvasContext()
+        if (!ctx || drawings.length === 0) return
+
+        const styleGroups: { style: string; drawings: Drawing[] }[] = []
+        if (drawings.length > 0) {
+          let currentGroup = {
+            style: `${drawings[0].drawing_data.color}-${drawings[0].drawing_data.lineWidth}`,
+            drawings: [],
+          }
+          styleGroups.push(currentGroup)
+
+          for (const d of drawings) {
+            const styleKey = `${d.drawing_data.color}-${d.drawing_data.lineWidth}`
+            if (styleKey !== currentGroup.style) {
+              currentGroup = { style: styleKey, drawings: [d] }
+              styleGroups.push(currentGroup)
+            } else {
+              currentGroup.drawings.push(d)
+            }
+          }
+        }
+
+        for (const group of styleGroups) {
+          if (group.drawings.length === 0) continue
+          const firstDrawing = group.drawings[0]
+          const { color, lineWidth } = firstDrawing.drawing_data
+          ctx.strokeStyle = color
+          ctx.lineWidth = lineWidth
+          ctx.beginPath()
+          for (const drawing of group.drawings) {
+            if (drawing.is_first_segment) {
+              ctx.moveTo(drawing.drawing_data.from.x, drawing.drawing_data.from.y)
+            }
+            ctx.lineTo(drawing.drawing_data.to.x, drawing.drawing_data.to.y)
+          }
+          ctx.stroke()
+        }
       },
       forceStopDrawing: () => {
         if (isDrawingRef.current) {
@@ -130,21 +156,12 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(
     useEffect(() => {
       const ctx = getCanvasContext()
       if (!ctx) return
-
-      // Clear and redraw efficiently
       ctx.clearRect(0, 0, width, height)
-
-      // Batch draw all initial drawings
-      ctx.beginPath()
-      initialDrawings.forEach((d) => {
-        const { from, to, color: lineColor, lineWidth: lineW } = d.drawing_data
-        ctx.moveTo(from.x, from.y)
-        ctx.lineTo(to.x, to.y)
-        ctx.strokeStyle = lineColor
-        ctx.lineWidth = lineW
-        ctx.stroke()
-      })
-    }, [initialDrawings, width, height, getCanvasContext])
+      if (initialDrawings.length > 0) {
+        const handle = ref as React.RefObject<CanvasHandle>
+        handle.current?.drawBatchFromBroadcast(initialDrawings)
+      }
+    }, [initialDrawings, width, height, getCanvasContext, ref])
 
     const getPoint = useCallback((e: React.MouseEvent | React.TouchEvent): Point | null => {
       if (!canvasRef.current) return null
@@ -159,7 +176,6 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(
     const handleMouseDown = useCallback(
       (e: React.MouseEvent | React.TouchEvent) => {
         if (!isDrawable) return
-
         isDrawingRef.current = true
         const point = getPoint(e)
         if (point) {
@@ -173,12 +189,9 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(
     const handleMouseMove = useCallback(
       (e: React.MouseEvent | React.TouchEvent) => {
         if (!isDrawingRef.current || !lastPointRef.current) return
-
         const currentPoint = getPoint(e)
         if (currentPoint) {
-          // Store the point and use requestAnimationFrame for smooth drawing
           pendingDrawRef.current = currentPoint
-
           if (!animationFrameRef.current) {
             animationFrameRef.current = requestAnimationFrame(performDraw)
           }
@@ -189,16 +202,13 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(
 
     const handleMouseUp = useCallback(() => {
       if (!isDrawingRef.current) return
-
       isDrawingRef.current = false
       lastPointRef.current = null
       pendingDrawRef.current = null
-
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current)
         animationFrameRef.current = null
       }
-
       onDrawEnd()
     }, [onDrawEnd])
 

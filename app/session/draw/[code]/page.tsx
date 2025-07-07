@@ -35,7 +35,7 @@ import { APP_WALLET_ADDRESS } from "@/lib/constants"
 import { useFreeNukeAction } from "@/hooks/use-free-nuke-action"
 import { ErrorBoundary } from "@/components/error-boundary"
 
-type DrawingSegment = Omit<Drawing, "id">
+type DrawingSegment = Omit<Drawing, "id" | "is_first_segment"> & { is_first_segment?: boolean }
 
 const BROADCAST_INTERVAL_MS = 200
 const DRAWING_TIME_LIMIT_MS = 5000
@@ -67,7 +67,6 @@ function DrawPageContent({ params }: { params: { code: string } }) {
   const isFirstSegmentOfStroke = useRef(true)
   const creditSpentRef = useRef(false)
 
-  // Use a ref to hold the session to prevent re-creating callbacks that depend on it
   const sessionRef = useRef(session)
   useEffect(() => {
     sessionRef.current = session
@@ -76,7 +75,7 @@ function DrawPageContent({ params }: { params: { code: string } }) {
   const handleIncomingDrawBatch = useCallback(
     ({ segments }: { segments: Drawing[] }) => {
       if (segments.length > 0 && segments[0]?.drawer_wallet_address !== publicKey?.toBase58()) {
-        segments.forEach((drawing) => canvasRef.current?.drawFromBroadcast(drawing))
+        canvasRef.current?.drawBatchFromBroadcast(segments)
       }
     },
     [publicKey],
@@ -96,8 +95,6 @@ function DrawPageContent({ params }: { params: { code: string } }) {
   )
   const channel = useRealtimeChannel(session?.id ?? null, channelOptions)
 
-  // This callback is now stable and won't cause re-renders.
-  // It safely reads the session ID from a ref.
   const refreshUserData = useCallback(async () => {
     if (!publicKey || !sessionRef.current) return
     try {
@@ -127,13 +124,9 @@ function DrawPageContent({ params }: { params: { code: string } }) {
           setIsLoading(false)
           return
         }
-
-        // FIX: Manually update the ref before the first data fetch to prevent a race condition.
-        // This ensures `refreshUserData` has the session ID immediately.
         sessionRef.current = s as { id: string; owner_wallet_address: string }
         setSession(s as { id: string; owner_wallet_address: string })
         setInitialDrawings(d)
-
         if (publicKey) {
           await refreshUserData()
         }
@@ -197,7 +190,11 @@ function DrawPageContent({ params }: { params: { code: string } }) {
     async (drawing: Omit<Drawing, "drawer_wallet_address" | "id">) => {
       if (!publicKey || !sessionRef.current) return
 
-      const newSegment: DrawingSegment = { ...drawing, drawer_wallet_address: publicKey.toBase58() }
+      const newSegment: DrawingSegment = {
+        ...drawing,
+        drawer_wallet_address: publicKey.toBase58(),
+        is_first_segment: isFirstSegmentOfStroke.current,
+      }
       broadcastBufferRef.current.push(newSegment)
       currentStrokeRef.current.push(newSegment)
 
