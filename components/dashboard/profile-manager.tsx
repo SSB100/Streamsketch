@@ -1,84 +1,79 @@
 "use client"
 
+import type React from "react"
+
 import { useState } from "react"
 import { useWallet } from "@solana/wallet-adapter-react"
-import { updateUserUsername } from "@/app/actions"
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
+import { Label } from "@/components/ui/label"
 import { toast } from "sonner"
+import { updateUserUsername } from "@/app/actions"
+import { Loader2 } from "lucide-react"
 
 interface ProfileManagerProps {
   initialUsername: string | null
-  onProfileUpdate: () => void
 }
 
-export function ProfileManager({ initialUsername, onProfileUpdate }: ProfileManagerProps) {
+export function ProfileManager({ initialUsername }: ProfileManagerProps) {
   const { publicKey } = useWallet()
   const [username, setUsername] = useState(initialUsername || "")
-  const [isEditing, setIsEditing] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
 
-  const handleSave = async () => {
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
     if (!publicKey) {
       toast.error("Wallet not connected.")
       return
     }
-    if (!username || username.length < 3) {
-      toast.error("Username must be at least 3 characters long.")
+    if (username === initialUsername) {
+      toast.info("Username is already set to this.")
       return
     }
-
     setIsLoading(true)
-    const result = await updateUserUsername(publicKey.toBase58(), username)
-    setIsLoading(false)
-
-    if (result.success) {
-      toast.success("Username updated successfully!")
-      setIsEditing(false)
-      onProfileUpdate()
-    } else {
-      toast.error(`Failed to update username: ${result.error}`)
+    try {
+      const result = await updateUserUsername(publicKey.toBase58(), username)
+      if (result.success) {
+        toast.success("Username updated successfully!")
+      } else {
+        toast.error("Failed to update username", { description: result.error })
+      }
+    } catch (error: any) {
+      toast.error("An unexpected error occurred", { description: error.message })
+    } finally {
+      setIsLoading(false)
     }
   }
 
   return (
-    <Card>
+    <Card className="border-border/20 bg-white/5">
       <CardHeader>
-        <CardTitle>Profile</CardTitle>
-        <CardDescription>Manage your public profile settings.</CardDescription>
+        <CardTitle className="text-white">Your Profile</CardTitle>
+        <CardDescription>Set a unique username to be displayed when you interact.</CardDescription>
       </CardHeader>
       <CardContent>
-        <div className="grid gap-2">
-          <label htmlFor="username" className="text-sm font-medium">
-            Username
-          </label>
-          <div className="flex items-center gap-2">
+        <form onSubmit={handleSubmit} className="flex items-end gap-4">
+          <div className="grid w-full max-w-sm items-center gap-1.5">
+            <Label htmlFor="username" className="text-white">
+              Username
+            </Label>
             <Input
               id="username"
+              type="text"
+              placeholder="YourAwesomeName"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              disabled={!isEditing || isLoading}
-              placeholder="Your public username"
-              className="max-w-sm"
+              pattern="^[a-zA-Z0-9_]{3,15}$"
+              title="3-15 characters, letters, numbers, and underscores only."
+              required
             />
-            {!isEditing ? (
-              <Button variant="outline" onClick={() => setIsEditing(true)}>
-                Edit
-              </Button>
-            ) : (
-              <div className="flex gap-2">
-                <Button onClick={handleSave} disabled={isLoading}>
-                  {isLoading ? "Saving..." : "Save"}
-                </Button>
-                <Button variant="ghost" onClick={() => setIsEditing(false)} disabled={isLoading}>
-                  Cancel
-                </Button>
-              </div>
-            )}
           </div>
-          <p className="text-xs text-muted-foreground">Your username will be visible to other users.</p>
-        </div>
+          <Button type="submit" disabled={isLoading || !publicKey || username === initialUsername}>
+            {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            Save
+          </Button>
+        </form>
       </CardContent>
     </Card>
   )

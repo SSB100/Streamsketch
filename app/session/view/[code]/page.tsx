@@ -5,7 +5,7 @@ import type { Drawing } from "@/lib/types"
 import { Canvas, type CanvasHandle } from "@/components/whiteboard/canvas"
 import { NukeAnimationOverlay } from "@/components/whiteboard/nuke-animation-overlay"
 import { useRealtimeChannel } from "@/hooks/use-realtime-channel"
-import { getSessionData, getNewDrawings } from "@/app/actions"
+import { getSessionData } from "@/app/actions"
 import { Copy, Eye, Maximize, Minimize } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
@@ -14,32 +14,24 @@ const POLLING_INTERVAL_MS = 5000 // Check for updates every 5 seconds
 
 export default function ViewPage({ params }: { params: { code: string } }) {
   const [session, setSession] = useState<{ id: string } | null>(null)
-  const [initialDrawings, setInitialDrawings] = useState<Drawing[]>([])
+  const [drawings, setDrawings] = useState<Drawing[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [nukeEvent, setNukeEvent] = useState<{ username: string | null; animationId: string } | null>(null)
 
   const canvasRef = useRef<CanvasHandle>(null)
   const fullscreenContainerRef = useRef<HTMLDivElement>(null)
-  const lastDrawingIdRef = useRef<number>(0)
-  const lastRealtimeEventTimestamp = useRef<number>(Date.now())
+  const lastRealtimeEventTimestamp = useRef<number>(0)
 
   const handleIncomingDrawBatch = useCallback(({ segments }: { segments: Drawing[] }) => {
     lastRealtimeEventTimestamp.current = Date.now()
-    if (segments.length > 0) {
-      // Draw the segments immediately for real-time feel
-      canvasRef.current?.drawBatchFromBroadcast(segments)
-      // NOTE: We do NOT update lastDrawingIdRef here.
-      // The polling mechanism remains the source of truth for synchronization,
-      // while broadcast provides the instant visual update.
-    }
+    setDrawings((current) => [...current, ...segments])
   }, [])
 
   const handleIncomingNuke = useCallback(
     ({ username, animationId }: { username: string | null; animationId: string }) => {
       lastRealtimeEventTimestamp.current = Date.now()
-      canvasRef.current?.clearCanvas()
-      lastDrawingIdRef.current = 0 // Reset on nuke
+      setDrawings([])
       setNukeEvent({ username, animationId })
     },
     [],
@@ -59,19 +51,14 @@ export default function ViewPage({ params }: { params: { code: string } }) {
     const fetchInitialData = async () => {
       setIsLoading(true)
       try {
-        const { session: sessionData, drawings } = await getSessionData(params.code)
+        const { session: sessionData, drawings: initialDrawings } = await getSessionData(params.code)
         if (sessionData) {
           setSession(sessionData)
-          setInitialDrawings(drawings)
-          if (drawings.length > 0) {
-            lastDrawingIdRef.current = Math.max(...drawings.map((d) => d.id))
-          }
-        } else {
-          toast.error("Session not found.")
+          setDrawings(initialDrawings)
         }
       } catch (error) {
         console.error("Failed to fetch session data:", error)
-        toast.error("Failed to load session data.")
+        toast.error("Failed to load session data")
       } finally {
         setIsLoading(false)
       }
@@ -79,23 +66,24 @@ export default function ViewPage({ params }: { params: { code: string } }) {
     fetchInitialData()
   }, [params.code])
 
-  // Fallback polling for data synchronization
+  // Intelligent Polling for data synchronization
   useEffect(() => {
-    if (!session?.id) return
+    if (!params.code) return
 
     const intervalId = setInterval(async () => {
-      // Only poll if there has been no real-time activity for a while
+      // If we received a real-time event recently, skip this poll.
+      // This prevents overwriting a line that is actively being drawn.
       if (Date.now() - lastRealtimeEventTimestamp.current < POLLING_INTERVAL_MS) {
+        console.log("[Polling] Skipped due to recent real-time activity.")
         return
       }
 
-      console.log("[Polling] Real-time quiet, checking for missed drawings...")
+      console.log("[Polling] Canvas idle, refetching for synchronization...")
       try {
-        const newDrawings = await getNewDrawings(session.id, lastDrawingIdRef.current)
-        if (newDrawings.length > 0) {
-          toast.info(`Synced ${newDrawings.length} missed drawings via polling.`)
-          canvasRef.current?.drawBatchFromBroadcast(newDrawings)
-          lastDrawingIdRef.current = Math.max(...newDrawings.map((d) => d.id))
+        const { drawings: dbDrawings } = await getSessionData(params.code)
+        if (dbDrawings) {
+          // The database is the source of truth. Replace local state when idle.
+          setDrawings(dbDrawings)
         }
       } catch (error) {
         console.error("Polling failed:", error)
@@ -103,7 +91,7 @@ export default function ViewPage({ params }: { params: { code: string } }) {
     }, POLLING_INTERVAL_MS)
 
     return () => clearInterval(intervalId)
-  }, [session?.id])
+  }, [params.code])
 
   const toggleFullscreen = () => {
     const elem = fullscreenContainerRef.current
@@ -153,7 +141,7 @@ export default function ViewPage({ params }: { params: { code: string } }) {
           width={1280}
           height={720}
           isDrawable={false}
-          initialDrawings={initialDrawings}
+          initialDrawings={drawings}
           onDraw={() => {}}
           onDrawStart={() => {}}
           onDrawEnd={() => {}}
@@ -174,7 +162,7 @@ export default function ViewPage({ params }: { params: { code: string } }) {
           <span className="text-muted-foreground">Session Code:</span>
           <span className="font-mono text-lg font-bold text-neon-pink">{params.code}</span>
           <button
-            onClick={() => copyToClipboard(`${window.location.origin}/session/draw/${params.code}`)}
+            onClick={() => copyToClipboard(`https://streamsketch.tech/session/draw/${params.code}`)}
             className="ml-1 transition-transform hover:scale-110"
           >
             <Copy className="h-4 w-4" />

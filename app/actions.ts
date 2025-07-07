@@ -9,25 +9,12 @@ import {
   LAMPORTS_PER_SOL,
   PublicKey,
   SystemProgram,
-  sendAndConfirmTransaction,
   Transaction,
+  sendAndConfirmTransaction,
 } from "@solana/web3.js"
 import bs58 from "bs58"
 import type { NukeAnimation } from "@/lib/nuke-animations"
 import { PURCHASE_PACKAGES } from "@/lib/packages"
-import { timeAsync } from "@/lib/performance"
-
-// Enhanced caching with longer duration and smarter invalidation
-const userDataCache = new Map<string, { data: any; timestamp: number }>()
-const CACHE_DURATION = 60000 // Increased to 60 seconds for better performance
-
-// Cache for session data to avoid repeated queries
-const sessionDataCache = new Map<string, { data: any; timestamp: number }>()
-const SESSION_CACHE_DURATION = 30000 // 30 seconds for session data
-
-export async function revalidateDashboardAction() {
-  revalidatePath("/dashboard")
-}
 
 async function ensureUser(walletAddress: string) {
   const admin = createSupabaseAdminClient()
@@ -51,6 +38,64 @@ async function ensureUser(walletAddress: string) {
   }
 }
 
+// Helper function to safely get free credits with multiple fallback strategies
+async function getFreeCreditsTotal(
+  admin: any,
+  walletAddress: string,
+): Promise<{ totalFreeLines: number; totalFreeNukes: number }> {
+  // Strategy 1: Try the RPC function first
+  try {
+    const { data: rpcData, error: rpcErr } = await admin
+      .rpc("get_total_free_credits", { p_user_wallet_address: walletAddress })
+      .single()
+
+    if (!rpcErr && rpcData && typeof rpcData === "object") {
+      const totalFreeLines = Number(rpcData.total_free_lines ?? 0)
+      const totalFreeNukes = Number(rpcData.total_free_nukes ?? 0)
+
+      // Validate the numbers are reasonable
+      if (!isNaN(totalFreeLines) && !isNaN(totalFreeNukes) && totalFreeLines >= 0 && totalFreeNukes >= 0) {
+        return { totalFreeLines, totalFreeNukes }
+      }
+    }
+
+    console.warn("[StreamSketch] RPC returned invalid data, falling back to direct queries:", rpcData)
+  } catch (err: any) {
+    console.warn("[StreamSketch] RPC failed, falling back to direct queries:", err?.message ?? err)
+  }
+
+  // Strategy 2: Direct table queries with error handling (updated for new tables)
+  try {
+    const [lineResult, nukeResult] = await Promise.allSettled([
+      admin.from("session_free_line_credits").select("amount").eq("user_wallet_address", walletAddress),
+      admin.from("session_free_nuke_credits").select("amount").eq("user_wallet_address", walletAddress),
+    ])
+
+    let totalFreeLines = 0
+    let totalFreeNukes = 0
+
+    if (lineResult.status === "fulfilled" && lineResult.value.data) {
+      totalFreeLines = lineResult.value.data.reduce(
+        (sum: number, row: { amount: number }) => sum + (row.amount ?? 0),
+        0,
+      )
+    }
+
+    if (nukeResult.status === "fulfilled" && nukeResult.value.data) {
+      totalFreeNukes = nukeResult.value.data.reduce(
+        (sum: number, row: { amount: number }) => sum + (row.amount ?? 0),
+        0,
+      )
+    }
+
+    return { totalFreeLines, totalFreeNukes }
+  } catch (err: any) {
+    console.error("[StreamSketch] All free credit queries failed:", err?.message ?? err)
+    // Strategy 3: Return zeros as final fallback
+    return { totalFreeLines: 0, totalFreeNukes: 0 }
+  }
+}
+
 export async function updateUserUsername(walletAddress: string, newUsername: string) {
   const admin = createSupabaseAdminClient()
   const { error } = await admin.from("users").update({ username: newUsername }).eq("wallet_address", walletAddress)
@@ -60,238 +105,73 @@ export async function updateUserUsername(walletAddress: string, newUsername: str
     if (error.code === "23514") return { success: false, error: "Invalid username format (3-15 chars, A-Z, 0-9, _)." }
     return { success: false, error: error.message }
   }
-
-  // Clear cache when username is updated
-  userDataCache.delete(walletAddress)
   revalidatePath("/dashboard")
   return { success: true }
 }
 
-// Super optimized getUserData with enhanced caching
 export async function getUserData(walletAddress: string) {
-  return timeAsync("getUserData", async () => {
-    // Check cache first with longer duration
-    const cached = userDataCache.get(walletAddress)
-    if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
-      return cached.data
-    }
-
-    const admin = createSupabaseAdminClient()
-    await ensureUser(walletAddress)
-
-    try {
-      // Use the optimized function with timeout protection
-      const { data, error } = await timeAsync("getUserData.optimizedQuery", () =>
-        Promise.race([
-          admin.rpc("refresh_user_stats", { p_wallet_address: walletAddress }).single(),
-          new Promise(
-            (_, reject) => setTimeout(() => reject(new Error("Query timeout")), 5000), // 5 second timeout
-          ),
-        ]),
-      )
-
-      if (error) {
-        console.error("[StreamSketch] Optimized user query failed:", error.message)
-        // Fallback to individual queries if the optimized one fails
-        return await getUserDataFallback(admin, walletAddress)
-      }
-
-      const result = {
-        lineCredits: data.total_line_credits || 0,
-        unclaimedSol: data.unclaimed_sol || 0,
-        totalClaimedSol: data.total_claimed_sol || 0,
-        username: data.username || null,
-        linesGifted: data.lines_gifted_this_week || 0,
-        nukesGifted: data.nukes_gifted_this_week || 0,
-        totalFreeLines: Number(data.total_free_lines) || 0,
-        totalFreeNukes: Number(data.total_free_nukes) || 0,
-      }
-
-      // Cache the result with longer duration
-      userDataCache.set(walletAddress, { data: result, timestamp: Date.now() })
-
-      return result
-    } catch (error: any) {
-      console.error("[StreamSketch] getUserData failed:", error?.message ?? error)
-      return await getUserDataFallback(admin, walletAddress)
-    }
-  })
-}
-
-// Optimized fallback function
-async function getUserDataFallback(admin: any, walletAddress: string) {
-  console.warn("[Fallback] Using fast fallback queries for", walletAddress.slice(0, 8))
+  const admin = createSupabaseAdminClient()
+  await ensureUser(walletAddress)
 
   try {
-    // Only get essential data in fallback for speed
-    const { data: userData } = await admin
+    // Get user data with error handling
+    const { data: userData, error: userError } = await admin
       .from("users")
       .select("username, line_credits_standard, line_credits_discounted")
       .eq("wallet_address", walletAddress)
       .single()
 
-    const { data: revenueData } = await admin
+    if (userError || !userData) {
+      console.error("[StreamSketch] Error getting user data:", userError?.message || "(unknown)")
+      throw new Error(userError?.message || "Failed to fetch user data")
+    }
+
+    // Get revenue data with error handling
+    const { data: revenueData, error: revenueError } = await admin
       .from("revenue")
       .select("unclaimed_sol, total_claimed_sol")
       .eq("streamer_wallet_address", walletAddress)
       .single()
 
-    const result = {
-      lineCredits: (userData?.line_credits_standard || 0) + (userData?.line_credits_discounted || 0),
+    if (revenueError && revenueError.code !== "PGRST116") {
+      console.error("[StreamSketch] Error getting revenue data:", revenueError.message)
+      throw revenueError
+    }
+
+    // Get gifting data with error handling
+    let giftingData = { lines_gifted: 0, nukes_gifted: 0 }
+    try {
+      const { data: giftingResult, error: giftingError } = await admin
+        .rpc("get_gifting_limits", { p_streamer_wallet_address: walletAddress })
+        .single()
+
+      if (!giftingError && giftingResult) {
+        giftingData = {
+          lines_gifted: giftingResult.lines_gifted ?? 0,
+          nukes_gifted: giftingResult.nukes_gifted ?? 0,
+        }
+      }
+    } catch (err: any) {
+      console.warn("[StreamSketch] Error fetching gifting limits, using defaults:", err?.message ?? err)
+    }
+
+    // Get free credits with robust error handling
+    const { totalFreeLines, totalFreeNukes } = await getFreeCreditsTotal(admin, walletAddress)
+
+    return {
+      lineCredits: (userData.line_credits_standard || 0) + (userData.line_credits_discounted || 0),
       unclaimedSol: revenueData?.unclaimed_sol ?? 0,
       totalClaimedSol: revenueData?.total_claimed_sol ?? 0,
-      username: userData?.username ?? null,
-      linesGifted: 0, // Skip these in fallback for speed
-      nukesGifted: 0,
-      totalFreeLines: 0,
-      totalFreeNukes: 0,
+      username: userData.username ?? null,
+      linesGifted: giftingData.lines_gifted,
+      nukesGifted: giftingData.nukes_gifted,
+      totalFreeLines,
+      totalFreeNukes,
     }
-
-    // Cache fallback result too
-    userDataCache.set(walletAddress, { data: result, timestamp: Date.now() })
-    return result
   } catch (error: any) {
-    console.error("[StreamSketch] Fallback queries failed:", error?.message ?? error)
-    return {
-      lineCredits: 0,
-      unclaimedSol: 0,
-      totalClaimedSol: 0,
-      username: null,
-      linesGifted: 0,
-      nukesGifted: 0,
-      totalFreeLines: 0,
-      totalFreeNukes: 0,
-    }
+    console.error("[StreamSketch] getUserData failed:", error?.message ?? error)
+    throw new Error(`Failed to get user data: ${error?.message ?? "Unknown error"}`)
   }
-}
-
-// Optimized session data with caching
-export async function getSessionData(shortCode: string) {
-  // Check cache first
-  const cached = sessionDataCache.get(shortCode)
-  if (cached && Date.now() - cached.timestamp < SESSION_CACHE_DURATION) {
-    return cached.data
-  }
-
-  const supabase = createSupabaseAdminClient()
-  const { data: session, error: sessionError } = await supabase
-    .from("sessions")
-    .select("id, owner_wallet_address")
-    .eq("short_code", shortCode)
-    .single()
-
-  if (sessionError || !session) {
-    const result = { session: null, drawings: [] }
-    sessionDataCache.set(shortCode, { data: result, timestamp: Date.now() })
-    return result
-  }
-
-  const { data: drawings, error: drawingsError } = await supabase
-    .from("drawings")
-    .select("id, drawing_data, drawer_wallet_address")
-    .eq("session_id", session.id)
-    .order("id", { ascending: true })
-    .limit(1000) // Increased limit for very active sessions
-
-  if (drawingsError) throw new Error(drawingsError.message)
-
-  const result = { session, drawings: drawings as Drawing[] }
-  sessionDataCache.set(shortCode, { data: result, timestamp: Date.now() })
-  return result
-}
-
-export async function spendDrawingCredit(sessionId: string, drawerWalletAddress: string) {
-  const supabase = createSupabaseAdminClient()
-  const { data, error } = await supabase.rpc("spend_credit_and_draw", {
-    p_session_id: sessionId,
-    p_drawer_wallet_address: drawerWalletAddress,
-  })
-
-  if (error) {
-    console.error("Error spending credit:", error)
-    return { success: false, error: error.message, newCredits: 0 }
-  }
-
-  userDataCache.delete(drawerWalletAddress)
-  return { success: true, newCredits: data }
-}
-
-export async function processCreditPurchase(
-  walletAddress: string,
-  txSignature: string,
-  packageId: keyof typeof PURCHASE_PACKAGES,
-) {
-  const admin = createSupabaseAdminClient()
-  const creditPackage = PURCHASE_PACKAGES[packageId]
-
-  if (!creditPackage) {
-    return { success: false, error: "Invalid package selected." }
-  }
-
-  const rpcHost = process.env.SOLANA_RPC_HOST || process.env.NEXT_PUBLIC_SOLANA_RPC_HOST
-  if (!rpcHost) {
-    console.error("CRITICAL: SOLANA_RPC_HOST is not set.")
-    return { success: false, error: "Service not configured." }
-  }
-
-  try {
-    console.log(`[Purchase] Verifying transaction ${txSignature} on ${rpcHost}...`)
-    const connection = new Connection(rpcHost, "confirmed")
-    const tx = await connection.getParsedTransaction(txSignature, { maxSupportedTransactionVersion: 0 })
-
-    if (!tx) throw new Error("Transaction not found on-chain.")
-    if (tx.meta?.err) throw new Error(`Transaction failed on-chain: ${JSON.stringify(tx.meta.err)}`)
-
-    const transferInstruction = tx.transaction.message.instructions.find(
-      (ix) => "parsed" in ix && ix.parsed.type === "transfer",
-    ) as any
-
-    if (!transferInstruction) throw new Error("No transfer instruction found in transaction.")
-
-    const { source, destination, lamports } = transferInstruction.parsed.info
-    const expectedLamports = creditPackage.price * LAMPORTS_PER_SOL
-
-    console.log(`[Purchase] Validating transfer: ${source} -> ${destination} for ${lamports} lamports.`)
-
-    if (source !== walletAddress) throw new Error("Transaction sent from incorrect wallet.")
-    if (destination !== APP_WALLET_ADDRESS.toBase58()) throw new Error("Transaction sent to incorrect wallet.")
-    if (lamports < expectedLamports * 0.99) throw new Error("Incorrect SOL amount transferred.")
-
-    console.log("[Purchase] Transaction verified successfully.")
-  } catch (error: any) {
-    console.error(`[Purchase] Transaction verification failed for ${txSignature}:`, error.message)
-    return { success: false, error: `Transaction verification failed: ${error.message}` }
-  }
-
-  await ensureUser(walletAddress)
-
-  const { error: creditError } = await admin.rpc("add_line_credits", {
-    p_wallet_address: walletAddress,
-    p_standard_to_add: creditPackage.id === "small" ? creditPackage.lines : 0,
-    p_discounted_to_add: creditPackage.id === "large" ? creditPackage.lines : 0,
-  })
-
-  if (creditError) {
-    console.error("[Purchase] Failed to grant credits in DB:", creditError)
-    return { success: false, error: "Failed to update credit balance. Please contact support." }
-  }
-
-  const { error: logError } = await admin.from("transactions").insert({
-    user_wallet_address: walletAddress,
-    transaction_type: "purchase_lines",
-    sol_amount: creditPackage.price,
-    credit_amount: creditPackage.lines,
-    signature: txSignature,
-    notes: `Purchased ${creditPackage.name} (${creditPackage.lines} lines)`,
-  })
-
-  if (logError) {
-    console.error(`[Purchase] Credit purchase by ${walletAddress} logged incompletely (sig: ${txSignature}):`, logError)
-  }
-
-  userDataCache.delete(walletAddress)
-  revalidatePath("/dashboard")
-  return { success: true, message: `${creditPackage.lines} line credits added successfully!` }
 }
 
 export async function getUserSessions(walletAddress: string) {
@@ -301,7 +181,6 @@ export async function getUserSessions(walletAddress: string) {
     .select("id, short_code, is_active, created_at")
     .eq("owner_wallet_address", walletAddress)
     .order("created_at", { ascending: false })
-    .limit(20)
 
   if (error) throw new Error(error.message)
   return data
@@ -314,7 +193,7 @@ export async function getTransactionHistory(walletAddress: string) {
     .select("id, transaction_type, sol_amount, credit_amount, notes, created_at, signature")
     .eq("user_wallet_address", walletAddress)
     .order("created_at", { ascending: false })
-    .limit(25)
+    .limit(50)
 
   if (error) throw new Error(error.message)
   return data
@@ -366,6 +245,113 @@ export async function createSession(walletAddress: string, sessionName: string) 
   return { success: true, data: newSession }
 }
 
+export async function processCreditPurchase(
+  walletAddress: string,
+  txSignature: string,
+  packageId: keyof typeof PURCHASE_PACKAGES,
+) {
+  const admin = createSupabaseAdminClient()
+  const creditPackage = PURCHASE_PACKAGES[packageId]
+
+  if (!creditPackage) {
+    return { success: false, error: "Invalid package selected." }
+  }
+
+  const rpcHost = process.env.SOLANA_RPC_HOST || process.env.NEXT_PUBLIC_SOLANA_RPC_HOST
+  if (!rpcHost) {
+    console.error("CRITICAL: SOLANA_RPC_HOST is not set.")
+    return { success: false, error: "Service not configured." }
+  }
+
+  try {
+    const connection = new Connection(rpcHost, "confirmed")
+    const tx = await connection.getParsedTransaction(txSignature, { maxSupportedTransactionVersion: 0 })
+
+    if (!tx) throw new Error("Transaction not found.")
+    if (tx.meta?.err) throw new Error(`Transaction failed: ${JSON.stringify(tx.meta.err)}`)
+
+    const transferInstruction = tx.transaction.message.instructions.find(
+      (ix) => "parsed" in ix && ix.parsed.type === "transfer",
+    ) as any
+
+    if (!transferInstruction) throw new Error("No transfer instruction found.")
+
+    const { source, destination, lamports } = transferInstruction.parsed.info
+    const expectedLamports = creditPackage.price * LAMPORTS_PER_SOL
+
+    if (source !== walletAddress) throw new Error("Transaction sent from wrong wallet.")
+    if (destination !== APP_WALLET_ADDRESS.toBase58()) throw new Error("Transaction sent to wrong wallet.")
+    if (lamports < expectedLamports * 0.99) throw new Error("Incorrect amount transferred.")
+  } catch (error: any) {
+    console.error(`Transaction verification failed for ${txSignature}:`, error.message)
+    return { success: false, error: `Transaction verification failed: ${error.message}` }
+  }
+
+  await ensureUser(walletAddress)
+
+  const { error: creditError } = await admin.rpc("add_line_credits", {
+    p_wallet_address: walletAddress,
+    p_standard_to_add: creditPackage.id === "small" ? creditPackage.lines : 0,
+    p_discounted_to_add: creditPackage.id === "large" ? creditPackage.lines : 0,
+  })
+
+  if (creditError) {
+    console.error("Failed to grant credits:", creditError)
+    return { success: false, error: "Failed to update credit balance. Please contact support." }
+  }
+
+  const { error: logError } = await admin.from("transactions").insert({
+    user_wallet_address: walletAddress,
+    transaction_type: "purchase_lines",
+    sol_amount: creditPackage.price,
+    credit_amount: creditPackage.lines,
+    signature: txSignature,
+    notes: `Purchased ${creditPackage.name} (${creditPackage.lines} lines)`,
+  })
+
+  if (logError) {
+    console.error(`Credit purchase by ${walletAddress} logged incompletely (sig: ${txSignature}):`, logError)
+  }
+
+  revalidatePath("/dashboard")
+  return { success: true, message: `${creditPackage.lines} line credits added successfully!` }
+}
+
+export async function getSessionData(shortCode: string) {
+  const supabase = createSupabaseAdminClient()
+  const { data: session, error: sessionError } = await supabase
+    .from("sessions")
+    .select("id, owner_wallet_address")
+    .eq("short_code", shortCode)
+    .single()
+
+  if (sessionError || !session) return { session: null, drawings: [] }
+
+  const { data: drawings, error: drawingsError } = await supabase
+    .from("drawings")
+    .select("id, drawing_data, drawer_wallet_address")
+    .eq("session_id", session.id)
+    .order("id", { ascending: true })
+
+  if (drawingsError) throw new Error(drawingsError.message)
+
+  return { session, drawings: drawings as Drawing[] }
+}
+
+export async function spendDrawingCredit(drawerWalletAddress: string, sessionId: string, drawing: Omit<Drawing, "id">) {
+  const supabase = createSupabaseAdminClient()
+
+  const { error } = await supabase.rpc("spend_credit_and_draw", {
+    p_drawer_wallet_address: drawerWalletAddress,
+    p_drawing_data: drawing.drawing_data,
+    p_session_id: sessionId,
+  })
+
+  if (error) return { success: false, error: error.message }
+  revalidatePath("/dashboard")
+  return { success: true }
+}
+
 export async function claimRevenueAction(walletAddress: string) {
   const supabase = createSupabaseAdminClient()
   const { data: claimedAmount, error: claimError } = await supabase.rpc("claim_all_revenue", {
@@ -394,24 +380,20 @@ export async function claimRevenueAction(walletAddress: string) {
   try {
     const connection = new Connection(rpcHost, "confirmed")
     const appKeypair = Keypair.fromSecretKey(bs58.decode(secretKeyStr))
-    const streamerPublicKey = new PublicKey(walletAddress)
 
-    // Pre-check: Ensure app wallet has enough SOL for the transfer + fees
-    const balance = await connection.getBalance(appKeypair.publicKey)
-    const requiredLamports = Math.floor(Number(claimedAmount) * LAMPORTS_PER_SOL)
-    if (balance < requiredLamports + 5000) {
-      // 5000 lamports for fee buffer
-      console.error(
-        `CRITICAL: App wallet has insufficient funds for payout. Balance: ${balance}, Required: ${requiredLamports}`,
-      )
-      return { success: false, error: "Payout service has insufficient funds. Please contact support." }
+    // Sanity check: Ensure the derived public key from the secret matches the public one.
+    if (appKeypair.publicKey.toBase58() !== APP_WALLET_ADDRESS.toBase58()) {
+      console.error("CRITICAL: APP_WALLET_SECRET_KEY does not match NEXT_PUBLIC_APP_WALLET_ADDRESS.")
+      return { success: false, error: "Payout service is misconfigured. Please contact support." }
     }
+
+    const streamerPublicKey = new PublicKey(walletAddress)
 
     const transaction = new Transaction().add(
       SystemProgram.transfer({
         fromPubkey: appKeypair.publicKey,
         toPubkey: streamerPublicKey,
-        lamports: requiredLamports,
+        lamports: Math.floor(Number(claimedAmount) * LAMPORTS_PER_SOL),
       }),
     )
 
@@ -432,7 +414,6 @@ export async function claimRevenueAction(walletAddress: string) {
       )
     }
 
-    userDataCache.delete(walletAddress)
     revalidatePath("/dashboard")
     return {
       success: true,
@@ -550,9 +531,9 @@ export async function giftCreditsToSessionAction(
     return { success: false, error: error.message }
   }
 
-  userDataCache.delete(ownerWallet)
-  userDataCache.delete(viewerWallet)
+  // Force refresh the dashboard data after gifting
   revalidatePath("/dashboard")
+
   return { success: true, message: data }
 }
 
@@ -570,6 +551,8 @@ export async function getFreeCreditsForSession(userWallet: string, sessionId: st
       return { freeLines: 0, freeNukes: 0 }
     }
 
+    // The RPC function returns an array with a single object, e.g., [{ free_lines: 5, free_nukes: 1 }]
+    // We need to access the first element of the array.
     const result = Array.isArray(data) && data.length > 0 ? data[0] : null
 
     return {
@@ -606,6 +589,7 @@ export async function triggerFreeNukeAction(nukerWalletAddress: string, sessionI
   const supabase = createSupabaseAdminClient()
 
   try {
+    // First, decrement the session-specific credit. This is fast and what the user waits for.
     const { error: decrementError } = await supabase.rpc("decrement_session_free_nuke_credit", {
       p_nuker_wallet_address: nukerWalletAddress,
       p_session_id: sessionId,
@@ -615,6 +599,7 @@ export async function triggerFreeNukeAction(nukerWalletAddress: string, sessionI
       return { success: false, error: `Failed to use free nuke: ${decrementError.message}` }
     }
 
+    // Then, trigger the cleanup in the background.
     supabase
       .rpc("perform_free_nuke_cleanup", {
         p_nuker_wallet_address: nukerWalletAddress,
@@ -634,53 +619,4 @@ export async function triggerFreeNukeAction(nukerWalletAddress: string, sessionI
     console.error("[StreamSketch] Free nuke action failed:", error?.message ?? error)
     return { success: false, error: `Failed to use free nuke: ${error?.message ?? "Unknown error"}` }
   }
-}
-
-export async function getNewDrawings(sessionId: string, lastId: number) {
-  const supabase = createSupabaseAdminClient()
-  const { data, error } = await supabase
-    .from("drawings")
-    .select("id, drawing_data, drawer_wallet_address")
-    .eq("session_id", sessionId)
-    .gt("id", lastId)
-    .order("id", { ascending: true })
-
-  if (error) {
-    console.error("Failed to fetch new drawings:", error)
-    return []
-  }
-  return data as Drawing[]
-}
-
-export async function broadcastDrawings(sessionId: string, segments: Omit<Drawing, "id">[]) {
-  if (segments.length === 0) return { success: true }
-  const supabase = createSupabaseAdminClient()
-  const channel = supabase.channel(`session-${sessionId}`)
-  const { error } = await channel.send({
-    type: "broadcast",
-    event: "draw_batch",
-    payload: { segments },
-  })
-  if (error) {
-    console.error(`[Realtime] Failed to broadcast drawings for session ${sessionId}:`, error)
-    return { success: false, error: error.message }
-  }
-  return { success: true }
-}
-
-export async function broadcastNuke(sessionId: string, nukerUsername: string | null, animationId: string) {
-  const supabase = createSupabaseAdminClient()
-  const channel = supabase.channel(`session-${sessionId}`)
-
-  const { error } = await channel.send({
-    type: "broadcast",
-    event: "nuke",
-    payload: { username: nukerUsername, animationId: animationId },
-  })
-
-  if (error) {
-    console.error(`[Realtime] Failed to broadcast nuke for session ${sessionId}:`, error)
-    return { success: false, error: error.message }
-  }
-  return { success: true }
 }

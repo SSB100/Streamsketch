@@ -1,6 +1,8 @@
 "use client"
 
-import { useCallback, useRef, useEffect, useState } from "react"
+import { useCallback } from "react"
+
+import { useEffect, useState } from "react"
 import { useWallet } from "@solana/wallet-adapter-react"
 import { Header } from "@/components/header"
 import { StatsCards } from "@/components/dashboard/stats-cards"
@@ -8,13 +10,7 @@ import { PurchaseCredits } from "@/components/dashboard/purchase-credits"
 import { SessionManager } from "@/components/dashboard/session-manager"
 import { TransactionHistory } from "@/components/dashboard/transaction-history"
 import { ProfileManager } from "@/components/dashboard/profile-manager"
-import {
-  getUserData,
-  getUserSessions,
-  getUserFreeCreditSessions,
-  getTransactionHistory,
-  revalidateDashboardAction,
-} from "@/app/actions"
+import { getUserData, getUserSessions, getUserFreeCreditSessions } from "@/app/actions"
 import { Skeleton } from "@/components/ui/skeleton"
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui"
 import { toast } from "sonner"
@@ -22,10 +18,31 @@ import { RewardManager } from "@/components/dashboard/reward-manager"
 import { ErrorBoundary } from "@/components/error-boundary"
 import { FreeCreditsDisplay } from "@/components/dashboard/free-credits-display"
 
-type UserData = Awaited<ReturnType<typeof getUserData>>
-type Session = Awaited<ReturnType<typeof getUserSessions>>[0]
-type Transaction = Awaited<ReturnType<typeof getTransactionHistory>>[0]
-type FreeCreditSession = Awaited<ReturnType<typeof getUserFreeCreditSessions>>[0]
+type UserData = {
+  lineCredits: number
+  unclaimedSol: number
+  totalClaimedSol: number
+  username: string | null
+  linesGifted: number
+  nukesGifted: number
+  totalFreeLines: number
+  totalFreeNukes: number
+  sessions: Session[]
+  freeCreditSessions: Array<{
+    session_id: string
+    session_code: string
+    free_lines: number
+    free_nukes: number
+    granted_at: string
+  }>
+}
+
+type Session = {
+  id: string
+  short_code: string
+  is_active: boolean
+  created_at: string
+}
 
 function DashboardSkeleton() {
   return (
@@ -49,47 +66,54 @@ function DashboardContent() {
   const { connected, publicKey, connecting } = useWallet()
   const [userData, setUserData] = useState<UserData | null>(null)
   const [sessions, setSessions] = useState<Session[]>([])
-  const [transactions, setTransactions] = useState<Transaction[]>([])
-  const [freeCreditSessions, setFreeCreditSessions] = useState<FreeCreditSession[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [hasError, setHasError] = useState(false)
-  const lastRefreshTimeRef = useRef(0)
 
-  const refreshAllData = useCallback(
-    async (force = false) => {
-      if (!publicKey) return
+  const refreshAllData = useCallback(async () => {
+    if (!publicKey) return
 
-      const now = Date.now()
-      if (!force && now - lastRefreshTimeRef.current < 5000) {
-        console.log("[Dashboard] Skipping refresh - too soon since last refresh")
-        return
+    setHasError(false)
+    try {
+      const [data, userSessions, freeCreditSessions] = await Promise.allSettled([
+        getUserData(publicKey.toBase58()),
+        getUserSessions(publicKey.toBase58()),
+        getUserFreeCreditSessions(publicKey.toBase58()),
+      ])
+
+      if (data.status === "fulfilled") {
+        const baseUserData = data.value
+        const sessions = userSessions.status === "fulfilled" ? userSessions.value : []
+        const freeCredits = freeCreditSessions.status === "fulfilled" ? freeCreditSessions.value : []
+
+        setUserData({
+          ...baseUserData,
+          sessions,
+          freeCreditSessions: freeCredits,
+        })
+        setSessions(sessions)
+      } else {
+        console.error("Failed to load user data:", data.reason)
+        toast.error("Could not load your account data. Some features may not work correctly.")
+        setUserData({
+          lineCredits: 0,
+          unclaimedSol: 0,
+          totalClaimedSol: 0,
+          username: null,
+          linesGifted: 0,
+          nukesGifted: 0,
+          totalFreeLines: 0,
+          totalFreeNukes: 0,
+          sessions: [],
+          freeCreditSessions: [],
+        })
+        setSessions([])
       }
-      lastRefreshTimeRef.current = now
-      setHasError(false)
-
-      try {
-        console.log("[Dashboard] Starting data refresh for", publicKey.toBase58().slice(0, 8))
-        await revalidateDashboardAction() // Use the server action
-
-        const [data, userSessions, freeCreditSessionsData, transactionsData] = await Promise.all([
-          getUserData(publicKey.toBase58()),
-          getUserSessions(publicKey.toBase58()),
-          getUserFreeCreditSessions(publicKey.toBase58()),
-          getTransactionHistory(publicKey.toBase58()),
-        ])
-
-        setUserData(data)
-        setSessions(userSessions)
-        setFreeCreditSessions(freeCreditSessionsData)
-        setTransactions(transactionsData)
-      } catch (error) {
-        console.error("Failed to load dashboard data:", error)
-        setHasError(true)
-        toast.error("Could not load your dashboard data. Please try refreshing the page.")
-      }
-    },
-    [publicKey],
-  )
+    } catch (error) {
+      console.error("Failed to load dashboard data:", error)
+      setHasError(true)
+      toast.error("Could not load your dashboard data. Please try refreshing the page.")
+    }
+  }, [publicKey])
 
   useEffect(() => {
     if (connecting) {
@@ -101,20 +125,13 @@ function DashboardContent() {
       setIsLoading(false)
       setUserData(null)
       setSessions([])
-      setTransactions([])
-      setFreeCreditSessions([])
       setHasError(false)
       return
     }
 
     setIsLoading(true)
-    refreshAllData(true).finally(() => setIsLoading(false))
+    refreshAllData().finally(() => setIsLoading(false))
   }, [connected, publicKey, connecting, refreshAllData])
-
-  const handleRefresh = useCallback(() => {
-    toast.info("Refreshing data...")
-    refreshAllData(true)
-  }, [refreshAllData])
 
   if (hasError) {
     return (
@@ -127,7 +144,7 @@ function DashboardContent() {
             onClick={() => {
               setHasError(false)
               setIsLoading(true)
-              refreshAllData(true).finally(() => setIsLoading(false))
+              refreshAllData().finally(() => setIsLoading(false))
             }}
             className="mt-4 rounded-lg bg-primary px-4 py-2 text-primary-foreground hover:bg-primary/90"
           >
@@ -156,19 +173,19 @@ function DashboardContent() {
                 totalClaimedSol={userData.totalClaimedSol}
                 totalFreeLines={userData.totalFreeLines}
                 totalFreeNukes={userData.totalFreeNukes}
-                onClaimSuccess={handleRefresh}
+                onClaimSuccess={refreshAllData}
               />
-              <FreeCreditsDisplay freeCreditSessions={freeCreditSessions} />
-              <ProfileManager initialUsername={userData.username} onProfileUpdate={handleRefresh} />
+              <FreeCreditsDisplay freeCreditSessions={userData.freeCreditSessions} />
+              <ProfileManager initialUsername={userData.username} />
               <RewardManager
                 linesGifted={userData.linesGifted}
                 nukesGifted={userData.nukesGifted}
-                userSessions={sessions}
-                onGiftSuccess={handleRefresh}
+                userSessions={userData.sessions}
+                onGiftSuccess={refreshAllData} // Add this callback
               />
-              <PurchaseCredits onPurchaseSuccess={handleRefresh} />
-              <SessionManager initialSessions={sessions} onSessionUpdate={handleRefresh} />
-              <TransactionHistory initialTransactions={transactions} />
+              <PurchaseCredits onPurchaseSuccess={refreshAllData} />
+              <SessionManager initialSessions={sessions} />
+              <TransactionHistory />
             </div>
           </>
         ) : (

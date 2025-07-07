@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import { useMemo } from "react"
+import { useMemo, useRef } from "react"
 import { ConnectionProvider, WalletProvider } from "@solana/wallet-adapter-react"
 import { WalletAdapterNetwork } from "@solana/wallet-adapter-base"
 import { WalletModalProvider } from "@solana/wallet-adapter-react-ui"
@@ -12,27 +12,30 @@ import "@solana/wallet-adapter-react-ui/styles.css"
 
 export function AppWalletProvider({ children }: { children: React.ReactNode }) {
   const network = WalletAdapterNetwork.Devnet
+  const hasRpcWarningBeenLogged = useRef(false)
 
-  // Always use the canonical Devnet RPC -– wallet-standard recognises this host.
-  const endpoint = useMemo(() => clusterApiUrl(network) /* e.g. https://api.devnet.solana.com */, [network])
+  const endpoint = useMemo(() => {
+    const custom = (process.env.NEXT_PUBLIC_SOLANA_RPC_HOST || "").trim()
 
-  // Optimize connection settings
-  const connectionConfig = useMemo(
-    () => ({
-      commitment: "confirmed" as const,
-      confirmTransactionInitialTimeout: 60000, // 60 seconds
-      disableRetryOnRateLimit: false,
-      httpHeaders: {
-        "Content-Type": "application/json",
-      },
-    }),
-    [],
-  )
+    if (custom && /^https?:\/\//i.test(custom)) {
+      return custom
+    }
+
+    // Only log the warning once to avoid spamming the console.
+    if (custom && !hasRpcWarningBeenLogged.current) {
+      console.warn(
+        "[WalletAdapter] CRITICAL: Ignoring invalid NEXT_PUBLIC_SOLANA_RPC_HOST (must start with http:// or https://). Falling back to Solana public RPC. This will cause performance issues and transaction failures.",
+      )
+      hasRpcWarningBeenLogged.current = true
+    }
+
+    return clusterApiUrl(network)
+  }, [network])
 
   const wallets = useMemo(() => [], [])
 
   return (
-    <ConnectionProvider endpoint={endpoint} config={connectionConfig}>
+    <ConnectionProvider endpoint={endpoint}>
       <WalletProvider
         wallets={wallets}
         autoConnect={true}
