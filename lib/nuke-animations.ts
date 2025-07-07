@@ -16,10 +16,17 @@ export const NUKE_ANIMATIONS: Record<string, NukeAnimation> = {
   },
   default: {
     id: "default",
+    name: "Classic Flash",
+    preview: "/previews/default-nuke.gif",
+    video: undefined,
+    price: 0.03, // Default price
+  },
+  cosmic_blast: {
+    id: "cosmic_blast",
     name: "Cosmic Blast",
     preview: "/previews/cosmic-blast.png",
     video: "https://hfjgo1ukrjb6miiq.public.blob.vercel-storage.com/Stream%20Sketch/Untitled%20video%20%2817%29-VXKGi2kslJjCYf8YIDk8dDqiIEX08M.mp4",
-    price: 0.02,
+    price: 0.02, // New special price
   },
   rug_pull: {
     id: "rug_pull",
