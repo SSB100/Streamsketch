@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback } from "react"
+import { useCallback, useRef } from "react"
 
 import { useEffect, useState } from "react"
 import { useWallet } from "@solana/wallet-adapter-react"
@@ -17,6 +17,7 @@ import { toast } from "sonner"
 import { RewardManager } from "@/components/dashboard/reward-manager"
 import { ErrorBoundary } from "@/components/error-boundary"
 import { FreeCreditsDisplay } from "@/components/dashboard/free-credits-display"
+import { PerformanceDebugPanel } from "@/components/debug/performance-monitor"
 
 type UserData = {
   lineCredits: number
@@ -68,52 +69,71 @@ function DashboardContent() {
   const [sessions, setSessions] = useState<Session[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [hasError, setHasError] = useState(false)
+  const lastRefreshTimeRef = useRef(0)
 
-  const refreshAllData = useCallback(async () => {
-    if (!publicKey) return
+  const refreshAllData = useCallback(
+    async (force = false) => {
+      if (!publicKey) return
 
-    setHasError(false)
-    try {
-      const [data, userSessions, freeCreditSessions] = await Promise.allSettled([
-        getUserData(publicKey.toBase58()),
-        getUserSessions(publicKey.toBase58()),
-        getUserFreeCreditSessions(publicKey.toBase58()),
-      ])
-
-      if (data.status === "fulfilled") {
-        const baseUserData = data.value
-        const sessions = userSessions.status === "fulfilled" ? userSessions.value : []
-        const freeCredits = freeCreditSessions.status === "fulfilled" ? freeCreditSessions.value : []
-
-        setUserData({
-          ...baseUserData,
-          sessions,
-          freeCreditSessions: freeCredits,
-        })
-        setSessions(sessions)
-      } else {
-        console.error("Failed to load user data:", data.reason)
-        toast.error("Could not load your account data. Some features may not work correctly.")
-        setUserData({
-          lineCredits: 0,
-          unclaimedSol: 0,
-          totalClaimedSol: 0,
-          username: null,
-          linesGifted: 0,
-          nukesGifted: 0,
-          totalFreeLines: 0,
-          totalFreeNukes: 0,
-          sessions: [],
-          freeCreditSessions: [],
-        })
-        setSessions([])
+      // Prevent too-frequent refreshes (≥ 5 s)
+      const now = Date.now()
+      if (!force && now - lastRefreshTimeRef.current < 5000) {
+        console.log("[Dashboard] Skipping refresh - too soon since last refresh")
+        return
       }
-    } catch (error) {
-      console.error("Failed to load dashboard data:", error)
-      setHasError(true)
-      toast.error("Could not load your dashboard data. Please try refreshing the page.")
-    }
-  }, [publicKey])
+      lastRefreshTimeRef.current = now
+
+      setHasError(false)
+
+      try {
+        console.log("[Dashboard] Starting data refresh for", publicKey.toBase58().slice(0, 8))
+        const startTime = performance.now()
+
+        const [data, userSessions, freeCreditSessions] = await Promise.allSettled([
+          getUserData(publicKey.toBase58()),
+          getUserSessions(publicKey.toBase58()),
+          getUserFreeCreditSessions(publicKey.toBase58()),
+        ])
+
+        const totalTime = performance.now() - startTime
+        console.log(`[Dashboard] Data refresh completed in ${totalTime.toFixed(2)}ms`)
+
+        if (data.status === "fulfilled") {
+          const baseUserData = data.value
+          const sessions = userSessions.status === "fulfilled" ? userSessions.value : []
+          const freeCredits = freeCreditSessions.status === "fulfilled" ? freeCreditSessions.value : []
+
+          setUserData({
+            ...baseUserData,
+            sessions,
+            freeCreditSessions: freeCredits,
+          })
+          setSessions(sessions)
+        } else {
+          console.error("Failed to load user data:", data.reason)
+          toast.error("Could not load your account data. Some features may not work correctly.")
+          setUserData({
+            lineCredits: 0,
+            unclaimedSol: 0,
+            totalClaimedSol: 0,
+            username: null,
+            linesGifted: 0,
+            nukesGifted: 0,
+            totalFreeLines: 0,
+            totalFreeNukes: 0,
+            sessions: [],
+            freeCreditSessions: [],
+          })
+          setSessions([])
+        }
+      } catch (error) {
+        console.error("Failed to load dashboard data:", error)
+        setHasError(true)
+        toast.error("Could not load your dashboard data. Please try refreshing the page.")
+      }
+    },
+    [publicKey],
+  )
 
   useEffect(() => {
     if (connecting) {
@@ -130,8 +150,11 @@ function DashboardContent() {
     }
 
     setIsLoading(true)
-    refreshAllData().finally(() => setIsLoading(false))
+    refreshAllData(true).finally(() => setIsLoading(false))
   }, [connected, publicKey, connecting, refreshAllData])
+
+  // Optimized refresh function that doesn't force refresh
+  const handleRefresh = useCallback(() => refreshAllData(false), [refreshAllData])
 
   if (hasError) {
     return (
@@ -144,7 +167,7 @@ function DashboardContent() {
             onClick={() => {
               setHasError(false)
               setIsLoading(true)
-              refreshAllData().finally(() => setIsLoading(false))
+              refreshAllData(true).finally(() => setIsLoading(false))
             }}
             className="mt-4 rounded-lg bg-primary px-4 py-2 text-primary-foreground hover:bg-primary/90"
           >
@@ -173,7 +196,7 @@ function DashboardContent() {
                 totalClaimedSol={userData.totalClaimedSol}
                 totalFreeLines={userData.totalFreeLines}
                 totalFreeNukes={userData.totalFreeNukes}
-                onClaimSuccess={refreshAllData}
+                onClaimSuccess={handleRefresh}
               />
               <FreeCreditsDisplay freeCreditSessions={userData.freeCreditSessions} />
               <ProfileManager initialUsername={userData.username} />
@@ -181,9 +204,9 @@ function DashboardContent() {
                 linesGifted={userData.linesGifted}
                 nukesGifted={userData.nukesGifted}
                 userSessions={userData.sessions}
-                onGiftSuccess={refreshAllData} // Add this callback
+                onGiftSuccess={handleRefresh}
               />
-              <PurchaseCredits onPurchaseSuccess={refreshAllData} />
+              <PurchaseCredits onPurchaseSuccess={handleRefresh} />
               <SessionManager initialSessions={sessions} />
               <TransactionHistory />
             </div>
@@ -207,6 +230,7 @@ function DashboardContent() {
           </div>
         )}
       </div>
+      <PerformanceDebugPanel />
     </main>
   )
 }

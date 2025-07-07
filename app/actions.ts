@@ -17,6 +17,14 @@ import type { NukeAnimation } from "@/lib/nuke-animations"
 import { PURCHASE_PACKAGES } from "@/lib/packages"
 import { timeAsync } from "@/lib/performance"
 
+// Enhanced caching with longer duration and smarter invalidation
+const userDataCache = new Map<string, { data: any; timestamp: number }>()
+const CACHE_DURATION = 60000 // Increased to 60 seconds for better performance
+
+// Cache for session data to avoid repeated queries
+const sessionDataCache = new Map<string, { data: any; timestamp: number }>()
+const SESSION_CACHE_DURATION = 30000 // 30 seconds for session data
+
 async function ensureUser(walletAddress: string) {
   const admin = createSupabaseAdminClient()
   const { data: user } = await admin.from("users").select("wallet_address").eq("wallet_address", walletAddress).single()
@@ -39,64 +47,6 @@ async function ensureUser(walletAddress: string) {
   }
 }
 
-// Helper function to safely get free credits with multiple fallback strategies
-async function getFreeCreditsTotal(
-  admin: any,
-  walletAddress: string,
-): Promise<{ totalFreeLines: number; totalFreeNukes: number }> {
-  // Strategy 1: Try the RPC function first
-  try {
-    const { data: rpcData, error: rpcErr } = await admin
-      .rpc("get_total_free_credits", { p_user_wallet_address: walletAddress })
-      .single()
-
-    if (!rpcErr && rpcData && typeof rpcData === "object") {
-      const totalFreeLines = Number(rpcData.total_free_lines ?? 0)
-      const totalFreeNukes = Number(rpcData.total_free_nukes ?? 0)
-
-      // Validate the numbers are reasonable
-      if (!isNaN(totalFreeLines) && !isNaN(totalFreeNukes) && totalFreeLines >= 0 && totalFreeNukes >= 0) {
-        return { totalFreeLines, totalFreeNukes }
-      }
-    }
-
-    console.warn("[StreamSketch] RPC returned invalid data, falling back to direct queries:", rpcData)
-  } catch (err: any) {
-    console.warn("[StreamSketch] RPC failed, falling back to direct queries:", err?.message ?? err)
-  }
-
-  // Strategy 2: Direct table queries with error handling (updated for new tables)
-  try {
-    const [lineResult, nukeResult] = await Promise.allSettled([
-      admin.from("session_free_line_credits").select("amount").eq("user_wallet_address", walletAddress),
-      admin.from("session_free_nuke_credits").select("amount").eq("user_wallet_address", walletAddress),
-    ])
-
-    let totalFreeLines = 0
-    let totalFreeNukes = 0
-
-    if (lineResult.status === "fulfilled" && lineResult.value.data) {
-      totalFreeLines = lineResult.value.data.reduce(
-        (sum: number, row: { amount: number }) => sum + (row.amount ?? 0),
-        0,
-      )
-    }
-
-    if (nukeResult.status === "fulfilled" && nukeResult.value.data) {
-      totalFreeNukes = nukeResult.value.data.reduce(
-        (sum: number, row: { amount: number }) => sum + (row.amount ?? 0),
-        0,
-      )
-    }
-
-    return { totalFreeLines, totalFreeNukes }
-  } catch (err: any) {
-    console.error("[StreamSketch] All free credit queries failed:", err?.message ?? err)
-    // Strategy 3: Return zeros as final fallback
-    return { totalFreeLines: 0, totalFreeNukes: 0 }
-  }
-}
-
 export async function updateUserUsername(walletAddress: string, newUsername: string) {
   const admin = createSupabaseAdminClient()
   const { error } = await admin.from("users").update({ username: newUsername }).eq("wallet_address", walletAddress)
@@ -106,155 +56,178 @@ export async function updateUserUsername(walletAddress: string, newUsername: str
     if (error.code === "23514") return { success: false, error: "Invalid username format (3-15 chars, A-Z, 0-9, _)." }
     return { success: false, error: error.message }
   }
+
+  // Clear cache when username is updated
+  userDataCache.delete(walletAddress)
   revalidatePath("/dashboard")
   return { success: true }
 }
 
-// Update getUserData with performance monitoring
+// Super optimized getUserData with enhanced caching
 export async function getUserData(walletAddress: string) {
   return timeAsync("getUserData", async () => {
+    // Check cache first with longer duration
+    const cached = userDataCache.get(walletAddress)
+    if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
+      console.log("[Cache] Using cached user data for", walletAddress.slice(0, 8))
+      return cached.data
+    }
+
     const admin = createSupabaseAdminClient()
     await ensureUser(walletAddress)
 
     try {
-      // Get user data with error handling
-      const { data: userData, error: userError } = await timeAsync("getUserData.userQuery", () =>
-        admin
-          .from("users")
-          .select("username, line_credits_standard, line_credits_discounted")
-          .eq("wallet_address", walletAddress)
-          .single(),
+      // Use the optimized function with timeout protection
+      const { data, error } = await timeAsync("getUserData.optimizedQuery", () =>
+        Promise.race([
+          admin.rpc("refresh_user_stats", { p_wallet_address: walletAddress }).single(),
+          new Promise(
+            (_, reject) => setTimeout(() => reject(new Error("Query timeout")), 5000), // 5 second timeout
+          ),
+        ]),
       )
 
-      if (userError || !userData) {
-        console.error("[StreamSketch] Error getting user data:", userError?.message || "(unknown)")
-        throw new Error(userError?.message || "Failed to fetch user data")
+      if (error) {
+        console.error("[StreamSketch] Optimized user query failed:", error.message)
+        // Fallback to individual queries if the optimized one fails
+        return await getUserDataFallback(admin, walletAddress)
       }
 
-      // Get revenue data with error handling
-      const { data: revenueData, error: revenueError } = await timeAsync("getUserData.revenueQuery", () =>
-        admin
-          .from("revenue")
-          .select("unclaimed_sol, total_claimed_sol")
-          .eq("streamer_wallet_address", walletAddress)
-          .single(),
-      )
-
-      if (revenueError && revenueError.code !== "PGRST116") {
-        console.error("[StreamSketch] Error getting revenue data:", revenueError.message)
-        throw revenueError
+      const result = {
+        lineCredits: data.total_line_credits || 0,
+        unclaimedSol: data.unclaimed_sol || 0,
+        totalClaimedSol: data.total_claimed_sol || 0,
+        username: data.username || null,
+        linesGifted: data.lines_gifted_this_week || 0,
+        nukesGifted: data.nukes_gifted_this_week || 0,
+        totalFreeLines: Number(data.total_free_lines) || 0,
+        totalFreeNukes: Number(data.total_free_nukes) || 0,
       }
 
-      // Get gifting data with error handling
-      let giftingData = { lines_gifted: 0, nukes_gifted: 0 }
-      try {
-        const { data: giftingResult, error: giftingError } = await timeAsync("getUserData.giftingQuery", () =>
-          admin.rpc("get_gifting_limits", { p_streamer_wallet_address: walletAddress }).single(),
-        )
+      // Cache the result with longer duration
+      userDataCache.set(walletAddress, { data: result, timestamp: Date.now() })
+      console.log("[Cache] Cached user data for", walletAddress.slice(0, 8))
 
-        if (!giftingError && giftingResult) {
-          giftingData = {
-            lines_gifted: giftingResult.lines_gifted ?? 0,
-            nukes_gifted: giftingResult.nukes_gifted ?? 0,
-          }
-        }
-      } catch (err: any) {
-        console.warn("[StreamSketch] Error fetching gifting limits, using defaults:", err?.message ?? err)
-      }
-
-      // Get free credits with robust error handling
-      const { totalFreeLines, totalFreeNukes } = await timeAsync("getUserData.freeCreditsQuery", () =>
-        getFreeCreditsTotal(admin, walletAddress),
-      )
-
-      return {
-        lineCredits: (userData.line_credits_standard || 0) + (userData.line_credits_discounted || 0),
-        unclaimedSol: revenueData?.unclaimed_sol ?? 0,
-        totalClaimedSol: revenueData?.total_claimed_sol ?? 0,
-        username: userData.username ?? null,
-        linesGifted: giftingData.lines_gifted,
-        nukesGifted: giftingData.nukes_gifted,
-        totalFreeLines,
-        totalFreeNukes,
-      }
+      return result
     } catch (error: any) {
       console.error("[StreamSketch] getUserData failed:", error?.message ?? error)
-      throw new Error(`Failed to get user data: ${error?.message ?? "Unknown error"}`)
+      return await getUserDataFallback(admin, walletAddress)
     }
   })
 }
 
-export async function getUserSessions(walletAddress: string) {
-  const admin = createSupabaseAdminClient()
-  const { data, error } = await admin
-    .from("sessions")
-    .select("id, short_code, is_active, created_at")
-    .eq("owner_wallet_address", walletAddress)
-    .order("created_at", { ascending: false })
+// Optimized fallback function
+async function getUserDataFallback(admin: any, walletAddress: string) {
+  console.log("[Fallback] Using fast fallback queries for", walletAddress.slice(0, 8))
 
-  if (error) throw new Error(error.message)
-  return data
-}
-
-export async function getTransactionHistory(walletAddress: string) {
-  const admin = createSupabaseAdminClient()
-  const { data, error } = await admin
-    .from("transactions")
-    .select("id, transaction_type, sol_amount, credit_amount, notes, created_at, signature")
-    .eq("user_wallet_address", walletAddress)
-    .order("created_at", { ascending: false })
-    .limit(50)
-
-  if (error) throw new Error(error.message)
-  return data
-}
-
-export async function createSession(walletAddress: string, sessionName: string) {
-  const admin = createSupabaseAdminClient()
-  await ensureUser(walletAddress)
-
-  const upperCaseName = sessionName.toUpperCase()
-  if (!upperCaseName || upperCaseName.length < 3 || upperCaseName.length > 20) {
-    return { success: false, error: "Name must be between 3 and 20 characters." }
-  }
-  if (!/^[A-Z0-9_-]+$/.test(upperCaseName)) {
-    return { success: false, error: "Name can only contain letters, numbers, underscores, and hyphens." }
-  }
-
-  let finalCode = ""
-  let isUnique = false
-  let attempts = 0
-  while (!isUnique && attempts < 10) {
-    const randomSuffix = Math.floor(1000 + Math.random() * 9000).toString()
-    const candidateCode = `${upperCaseName}-${randomSuffix}`
-    const { data: existing } = await admin
-      .from("sessions")
-      .select("short_code")
-      .eq("short_code", candidateCode)
+  try {
+    // Only get essential data in fallback for speed
+    const { data: userData } = await admin
+      .from("users")
+      .select("username, line_credits_standard, line_credits_discounted")
+      .eq("wallet_address", walletAddress)
       .single()
-    if (!existing) {
-      isUnique = true
-      finalCode = candidateCode
+
+    const { data: revenueData } = await admin
+      .from("revenue")
+      .select("unclaimed_sol, total_claimed_sol")
+      .eq("streamer_wallet_address", walletAddress)
+      .single()
+
+    const result = {
+      lineCredits: (userData?.line_credits_standard || 0) + (userData?.line_credits_discounted || 0),
+      unclaimedSol: revenueData?.unclaimed_sol ?? 0,
+      totalClaimedSol: revenueData?.total_claimed_sol ?? 0,
+      username: userData?.username ?? null,
+      linesGifted: 0, // Skip these in fallback for speed
+      nukesGifted: 0,
+      totalFreeLines: 0,
+      totalFreeNukes: 0,
     }
-    attempts++
+
+    // Cache fallback result too
+    userDataCache.set(walletAddress, { data: result, timestamp: Date.now() })
+    return result
+  } catch (error: any) {
+    console.error("[StreamSketch] Fallback queries failed:", error?.message ?? error)
+    return {
+      lineCredits: 0,
+      unclaimedSol: 0,
+      totalClaimedSol: 0,
+      username: null,
+      linesGifted: 0,
+      nukesGifted: 0,
+      totalFreeLines: 0,
+      totalFreeNukes: 0,
+    }
+  }
+}
+
+// Optimized session data with caching
+export async function getSessionData(shortCode: string) {
+  // Check cache first
+  const cached = sessionDataCache.get(shortCode)
+  if (cached && Date.now() - cached.timestamp < SESSION_CACHE_DURATION) {
+    console.log("[Cache] Using cached session data for", shortCode)
+    return cached.data
   }
 
-  if (!isUnique) {
-    return { success: false, error: "Could not generate a unique session code. Please try a different name." }
-  }
-
-  const { data: newSession, error } = await admin
+  const supabase = createSupabaseAdminClient()
+  const { data: session, error: sessionError } = await supabase
     .from("sessions")
-    .insert({ owner_wallet_address: walletAddress, short_code: finalCode })
-    .select()
+    .select("id, owner_wallet_address")
+    .eq("short_code", shortCode)
     .single()
 
-  if (error) return { success: false, error: error.message }
+  if (sessionError || !session) {
+    const result = { session: null, drawings: [] }
+    sessionDataCache.set(shortCode, { data: result, timestamp: Date.now() })
+    return result
+  }
 
-  revalidatePath("/dashboard")
-  return { success: true, data: newSession }
+  const { data: drawings, error: drawingsError } = await supabase
+    .from("drawings")
+    .select("id, drawing_data, drawer_wallet_address")
+    .eq("session_id", session.id)
+    .order("id", { ascending: true })
+    .limit(500) // Reduced limit for better performance
+
+  if (drawingsError) throw new Error(drawingsError.message)
+
+  const result = { session, drawings: drawings as Drawing[] }
+  sessionDataCache.set(shortCode, { data: result, timestamp: Date.now() })
+  return result
 }
 
+// Optimized drawing credit spending with minimal database calls
+export async function spendDrawingCredit(drawerWalletAddress: string, sessionId: string, drawing: Omit<Drawing, "id">) {
+  return timeAsync("spendDrawingCredit", async () => {
+    const supabase = createSupabaseAdminClient()
+
+    try {
+      // Use a more efficient approach - just call the RPC without extra validation
+      const { error } = await supabase.rpc("spend_credit_and_draw", {
+        p_drawer_wallet_address: drawerWalletAddress,
+        p_drawing_data: drawing.drawing_data,
+        p_session_id: sessionId,
+      })
+
+      if (error) {
+        console.error("[StreamSketch] Credit spend failed:", error.message)
+        return { success: false, error: error.message }
+      }
+
+      // Clear cache after spending credit (but don't wait for it)
+      setTimeout(() => userDataCache.delete(drawerWalletAddress), 0)
+      return { success: true }
+    } catch (error: any) {
+      console.error("[StreamSketch] Credit spend error:", error?.message ?? error)
+      return { success: false, error: error?.message ?? "Unknown error" }
+    }
+  })
+}
+
+// Clear cache when credits are updated
 export async function processCreditPurchase(
   walletAddress: string,
   txSignature: string,
@@ -323,46 +296,82 @@ export async function processCreditPurchase(
     console.error(`Credit purchase by ${walletAddress} logged incompletely (sig: ${txSignature}):`, logError)
   }
 
+  // Clear cache after purchase
+  userDataCache.delete(walletAddress)
   revalidatePath("/dashboard")
   return { success: true, message: `${creditPackage.lines} line credits added successfully!` }
 }
 
-export async function getSessionData(shortCode: string) {
-  const supabase = createSupabaseAdminClient()
-  const { data: session, error: sessionError } = await supabase
+export async function getUserSessions(walletAddress: string) {
+  const admin = createSupabaseAdminClient()
+  const { data, error } = await admin
     .from("sessions")
-    .select("id, owner_wallet_address")
-    .eq("short_code", shortCode)
-    .single()
+    .select("id, short_code, is_active, created_at")
+    .eq("owner_wallet_address", walletAddress)
+    .order("created_at", { ascending: false })
+    .limit(20) // Limit to 20 most recent sessions
 
-  if (sessionError || !session) return { session: null, drawings: [] }
-
-  const { data: drawings, error: drawingsError } = await supabase
-    .from("drawings")
-    .select("id, drawing_data, drawer_wallet_address")
-    .eq("session_id", session.id)
-    .order("id", { ascending: true })
-
-  if (drawingsError) throw new Error(drawingsError.message)
-
-  return { session, drawings: drawings as Drawing[] }
+  if (error) throw new Error(error.message)
+  return data
 }
 
-// Add performance logging to spendDrawingCredit
-export async function spendDrawingCredit(drawerWalletAddress: string, sessionId: string, drawing: Omit<Drawing, "id">) {
-  return timeAsync("spendDrawingCredit", async () => {
-    const supabase = createSupabaseAdminClient()
+export async function getTransactionHistory(walletAddress: string) {
+  const admin = createSupabaseAdminClient()
+  const { data, error } = await admin
+    .from("transactions")
+    .select("id, transaction_type, sol_amount, credit_amount, notes, created_at, signature")
+    .eq("user_wallet_address", walletAddress)
+    .order("created_at", { ascending: false })
+    .limit(25) // Limit to 25 most recent transactions
 
-    const { error } = await supabase.rpc("spend_credit_and_draw", {
-      p_drawer_wallet_address: drawerWalletAddress,
-      p_drawing_data: drawing.drawing_data,
-      p_session_id: sessionId,
-    })
+  if (error) throw new Error(error.message)
+  return data
+}
 
-    if (error) return { success: false, error: error.message }
-    revalidatePath("/dashboard")
-    return { success: true }
-  })
+export async function createSession(walletAddress: string, sessionName: string) {
+  const admin = createSupabaseAdminClient()
+  await ensureUser(walletAddress)
+
+  const upperCaseName = sessionName.toUpperCase()
+  if (!upperCaseName || upperCaseName.length < 3 || upperCaseName.length > 20) {
+    return { success: false, error: "Name must be between 3 and 20 characters." }
+  }
+  if (!/^[A-Z0-9_-]+$/.test(upperCaseName)) {
+    return { success: false, error: "Name can only contain letters, numbers, underscores, and hyphens." }
+  }
+
+  let finalCode = ""
+  let isUnique = false
+  let attempts = 0
+  while (!isUnique && attempts < 10) {
+    const randomSuffix = Math.floor(1000 + Math.random() * 9000).toString()
+    const candidateCode = `${upperCaseName}-${randomSuffix}`
+    const { data: existing } = await admin
+      .from("sessions")
+      .select("short_code")
+      .eq("short_code", candidateCode)
+      .single()
+    if (!existing) {
+      isUnique = true
+      finalCode = candidateCode
+    }
+    attempts++
+  }
+
+  if (!isUnique) {
+    return { success: false, error: "Could not generate a unique session code. Please try a different name." }
+  }
+
+  const { data: newSession, error } = await admin
+    .from("sessions")
+    .insert({ owner_wallet_address: walletAddress, short_code: finalCode })
+    .select()
+    .single()
+
+  if (error) return { success: false, error: error.message }
+
+  revalidatePath("/dashboard")
+  return { success: true, data: newSession }
 }
 
 export async function claimRevenueAction(walletAddress: string) {
@@ -420,6 +429,8 @@ export async function claimRevenueAction(walletAddress: string) {
       )
     }
 
+    // Clear cache after claiming revenue
+    userDataCache.delete(walletAddress)
     revalidatePath("/dashboard")
     return {
       success: true,
@@ -537,9 +548,10 @@ export async function giftCreditsToSessionAction(
     return { success: false, error: error.message }
   }
 
-  // Force refresh the dashboard data after gifting
+  // Clear cache for both users
+  userDataCache.delete(ownerWallet)
+  userDataCache.delete(viewerWallet)
   revalidatePath("/dashboard")
-
   return { success: true, message: data }
 }
 
@@ -557,8 +569,6 @@ export async function getFreeCreditsForSession(userWallet: string, sessionId: st
       return { freeLines: 0, freeNukes: 0 }
     }
 
-    // The RPC function returns an array with a single object, e.g., [{ free_lines: 5, free_nukes: 1 }]
-    // We need to access the first element of the array.
     const result = Array.isArray(data) && data.length > 0 ? data[0] : null
 
     return {
@@ -595,7 +605,6 @@ export async function triggerFreeNukeAction(nukerWalletAddress: string, sessionI
   const supabase = createSupabaseAdminClient()
 
   try {
-    // First, decrement the session-specific credit. This is fast and what the user waits for.
     const { error: decrementError } = await supabase.rpc("decrement_session_free_nuke_credit", {
       p_nuker_wallet_address: nukerWalletAddress,
       p_session_id: sessionId,
@@ -605,7 +614,6 @@ export async function triggerFreeNukeAction(nukerWalletAddress: string, sessionI
       return { success: false, error: `Failed to use free nuke: ${decrementError.message}` }
     }
 
-    // Then, trigger the cleanup in the background.
     supabase
       .rpc("perform_free_nuke_cleanup", {
         p_nuker_wallet_address: nukerWalletAddress,

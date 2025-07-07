@@ -38,40 +38,33 @@ import { ErrorBoundary } from "@/components/error-boundary"
 type DrawingSegment = Omit<Drawing, "id">
 
 // Optimize broadcast interval for better performance
-const BROADCAST_INTERVAL_MS = 100 // Increased from 50ms for better performance
+const BROADCAST_INTERVAL_MS = 200 // Increased for better performance
 const DRAWING_TIME_LIMIT_MS = 5000
 
-// Add drawing compression function
+// Optimized drawing compression
 const compressDrawingSegments = (segments: DrawingSegment[]): DrawingSegment[] => {
-  if (segments.length <= 1) return segments
+  if (segments.length <= 2) return segments
 
-  const compressed: DrawingSegment[] = []
-  let currentSegment = segments[0]
+  const compressed: DrawingSegment[] = [segments[0]] // Always keep first
 
-  for (let i = 1; i < segments.length; i++) {
-    const nextSegment = segments[i]
+  for (let i = 1; i < segments.length - 1; i++) {
+    const prev = segments[i - 1]
+    const curr = segments[i]
+    const next = segments[i + 1]
 
-    // If same color and line width, and points are close, skip intermediate points
-    if (
-      currentSegment.drawing_data.color === nextSegment.drawing_data.color &&
-      currentSegment.drawing_data.lineWidth === nextSegment.drawing_data.lineWidth
-    ) {
-      const distance = Math.sqrt(
-        Math.pow(nextSegment.drawing_data.from.x - currentSegment.drawing_data.to.x, 2) +
-          Math.pow(nextSegment.drawing_data.from.y - currentSegment.drawing_data.to.y, 2),
-      )
+    // Skip points that are too close together
+    const distToPrev = Math.sqrt(
+      Math.pow(curr.drawing_data.from.x - prev.drawing_data.to.x, 2) +
+        Math.pow(curr.drawing_data.from.y - prev.drawing_data.to.y, 2),
+    )
 
-      // Skip points that are very close together (< 2 pixels)
-      if (distance < 2) {
-        continue
-      }
+    // Only keep points that are far enough apart or change direction significantly
+    if (distToPrev > 5) {
+      compressed.push(curr)
     }
-
-    compressed.push(currentSegment)
-    currentSegment = nextSegment
   }
 
-  compressed.push(currentSegment)
+  compressed.push(segments[segments.length - 1]) // Always keep last
   return compressed
 }
 
@@ -100,6 +93,7 @@ function DrawPageContent({ params }: { params: { code: string } }) {
   const broadcastIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const drawingTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const isFirstSegmentOfStroke = useRef(true)
+  const creditSpentRef = useRef(false) // Track if credit was already spent for this stroke
 
   const handleIncomingDrawBatch = useCallback(
     ({ segments }: { segments: Drawing[] }) => {
@@ -124,14 +118,14 @@ function DrawPageContent({ params }: { params: { code: string } }) {
   )
   const channel = useRealtimeChannel(session?.id ?? null, channelOptions)
 
+  // Optimized user data refresh - only when needed
   const refreshUserData = useCallback(async () => {
     if (!publicKey || !session) return
     try {
       const [paidData, freeData] = await Promise.all([
         getUserData(publicKey.toBase58()),
-        getFreeCreditsForSession(publicKey.toBase58(), session.id), // Changed from session.owner_wallet_address to session.id
+        getFreeCreditsForSession(publicKey.toBase58(), session.id),
       ])
-      console.log("[DrawPage] Refreshed free credits for session:", session.id, freeData)
       setCredits({
         paidLines: paidData.lineCredits,
         username: paidData.username,
@@ -140,7 +134,6 @@ function DrawPageContent({ params }: { params: { code: string } }) {
       })
     } catch (err) {
       console.error("Failed to refresh user data:", err)
-      toast.error("Could not refresh your credit balance.")
     }
   }, [publicKey, session])
 
@@ -159,9 +152,8 @@ function DrawPageContent({ params }: { params: { code: string } }) {
         if (publicKey) {
           const [paidData, freeData] = await Promise.all([
             getUserData(publicKey.toBase58()),
-            getFreeCreditsForSession(publicKey.toBase58(), s.id), // Changed from s.owner_wallet_address to s.id
+            getFreeCreditsForSession(publicKey.toBase58(), s.id),
           ])
-          console.log("[DrawPage] Free credits for session:", s.id, freeData)
           setCredits({
             paidLines: paidData.lineCredits,
             username: paidData.username,
@@ -192,22 +184,29 @@ function DrawPageContent({ params }: { params: { code: string } }) {
     if (drawingTimeoutRef.current) clearTimeout(drawingTimeoutRef.current)
     broadcastDrawingSegments()
 
+    // Save to database in background - don't block UI
     if (publicKey && session && currentStrokeRef.current.length > 0) {
-      addDrawingSegments(session.id, currentStrokeRef.current).catch((err) => {
-        console.error("Failed to save full drawing stroke to DB:", err)
-        toast.error("Failed to save your drawing. Please try again.")
-      })
+      const strokeToSave = [...currentStrokeRef.current]
+      setTimeout(() => {
+        addDrawingSegments(session.id, strokeToSave).catch((err) => {
+          console.error("Failed to save drawing stroke:", err)
+        })
+      }, 0)
     }
+
     currentStrokeRef.current = []
+    creditSpentRef.current = false
   }, [broadcastDrawingSegments, publicKey, session])
 
-  const handleDrawStart = () => {
+  const handleDrawStart = useCallback(() => {
     if (credits.paidLines < 1 && credits.freeLines < 1) {
       toast.error("Out of line credits!")
       canvasRef.current?.forceStopDrawing()
       return
     }
+
     isFirstSegmentOfStroke.current = true
+    creditSpentRef.current = false
     broadcastBufferRef.current = []
     currentStrokeRef.current = []
 
@@ -219,38 +218,46 @@ function DrawPageContent({ params }: { params: { code: string } }) {
       toast.info("Drawing time limit reached (5 seconds).")
       canvasRef.current?.forceStopDrawing()
     }, DRAWING_TIME_LIMIT_MS)
-  }
+  }, [credits.paidLines, credits.freeLines, broadcastDrawingSegments])
 
-  const handleDraw = async (drawing: Omit<Drawing, "drawer_wallet_address" | "id">) => {
-    if (!publicKey || !session) return
+  const handleDraw = useCallback(
+    async (drawing: Omit<Drawing, "drawer_wallet_address" | "id">) => {
+      if (!publicKey || !session) return
 
-    const newSegment: DrawingSegment = { ...drawing, drawer_wallet_address: publicKey.toBase58() }
-    broadcastBufferRef.current.push(newSegment)
-    currentStrokeRef.current.push(newSegment)
+      const newSegment: DrawingSegment = { ...drawing, drawer_wallet_address: publicKey.toBase58() }
+      broadcastBufferRef.current.push(newSegment)
+      currentStrokeRef.current.push(newSegment)
 
-    if (isFirstSegmentOfStroke.current) {
-      isFirstSegmentOfStroke.current = false
-      if (credits.freeLines > 0) {
-        setCredits((p) => ({ ...p, freeLines: p.freeLines - 1 }))
-      } else {
-        setCredits((p) => ({ ...p, paidLines: p.paidLines - 1 }))
-      }
+      // Only spend credit once per stroke and do it asynchronously
+      if (isFirstSegmentOfStroke.current && !creditSpentRef.current) {
+        isFirstSegmentOfStroke.current = false
+        creditSpentRef.current = true
 
-      try {
-        const res = await spendDrawingCredit(publicKey.toBase58(), session.id, newSegment)
-        if (!res.success) {
-          toast.error("Failed to spend credit", { description: res.error })
-          await refreshUserData()
-          canvasRef.current?.forceStopDrawing()
+        // Update UI immediately for responsiveness
+        if (credits.freeLines > 0) {
+          setCredits((p) => ({ ...p, freeLines: p.freeLines - 1 }))
+        } else {
+          setCredits((p) => ({ ...p, paidLines: p.paidLines - 1 }))
         }
-      } catch (error) {
-        console.error("Error spending drawing credit:", error)
-        toast.error("Failed to spend credit")
-        await refreshUserData()
-        canvasRef.current?.forceStopDrawing()
+
+        // Spend credit in background - don't block drawing
+        setTimeout(async () => {
+          try {
+            const res = await spendDrawingCredit(publicKey.toBase58(), session.id, newSegment)
+            if (!res.success) {
+              console.error("Failed to spend credit:", res.error)
+              // Refresh credits on error
+              refreshUserData()
+            }
+          } catch (error) {
+            console.error("Error spending drawing credit:", error)
+            refreshUserData()
+          }
+        }, 0)
       }
-    }
-  }
+    },
+    [publicKey, session, credits.freeLines, refreshUserData],
+  )
 
   const handleNuke = async (animation: NukeAnimation) => {
     if (!publicKey || !wallet || !sendTransaction || !session || !channel) {
