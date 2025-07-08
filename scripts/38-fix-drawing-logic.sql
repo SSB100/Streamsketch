@@ -1,4 +1,7 @@
--- This script updates the drawing function to use session-specific free credits.
+-- This script fixes a critical bug in the drawing logic where running out of
+-- credits could cause unexpected behavior. The logic has been refactored
+-- to be more explicit and robust, ensuring that credit checks and drawing
+-- insertions are handled correctly without side effects.
 
 CREATE OR REPLACE FUNCTION spend_credit_and_draw(
   p_drawer_wallet_address TEXT,
@@ -29,12 +32,12 @@ BEGIN
   FOR UPDATE;
 
   IF v_free_credits IS NOT NULL AND v_free_credits > 0 THEN
+      -- Use a free credit
       UPDATE session_free_line_credits
       SET amount = amount - 1
       WHERE user_wallet_address = p_drawer_wallet_address
         AND session_id = p_session_id;
 
-      -- Insert drawing and log a zero-revenue transaction
       INSERT INTO drawings (session_id, drawer_wallet_address, drawing_data)
       VALUES (p_session_id, p_drawer_wallet_address, p_drawing_data);
 
@@ -49,17 +52,23 @@ BEGIN
   INTO v_paid_credits_standard, v_paid_credits_discounted
   FROM users WHERE wallet_address = p_drawer_wallet_address FOR UPDATE;
 
-  IF v_paid_credits_standard > 0 THEN
-      UPDATE users SET line_credits_standard = line_credits_standard - 1 WHERE wallet_address = p_drawer_wallet_address;
-      v_revenue_per_line := 0.002; -- Value of a standard line
-  ELSIF v_paid_credits_discounted > 0 THEN
-      UPDATE users SET line_credits_discounted = line_credits_discounted - 1 WHERE wallet_address = p_drawer_wallet_address;
-      v_revenue_per_line := 0.0015; -- Value of a discounted line
-  ELSE
+  -- REFACTORED LOGIC: First, check if any paid credits exist.
+  IF (v_paid_credits_standard IS NULL OR v_paid_credits_standard <= 0) AND
+     (v_paid_credits_discounted IS NULL OR v_paid_credits_discounted <= 0) THEN
       RAISE EXCEPTION 'Insufficient credits';
   END IF;
 
-  -- Insert drawing, calculate revenue, and log transaction as before
+  -- At this point, we know a paid credit is available.
+  -- Determine which to use, decrement it, and set the revenue value.
+  IF v_paid_credits_standard > 0 THEN
+      UPDATE users SET line_credits_standard = line_credits_standard - 1 WHERE wallet_address = p_drawer_wallet_address;
+      v_revenue_per_line := 0.002; -- Value of a standard line
+  ELSE
+      UPDATE users SET line_credits_discounted = line_credits_discounted - 1 WHERE wallet_address = p_drawer_wallet_address;
+      v_revenue_per_line := 0.0015; -- Value of a discounted line
+  END IF;
+
+  -- Now that a credit has been successfully spent, perform the drawing and revenue distribution.
   INSERT INTO drawings (session_id, drawer_wallet_address, drawing_data)
   VALUES (p_session_id, p_drawer_wallet_address, p_drawing_data);
 
