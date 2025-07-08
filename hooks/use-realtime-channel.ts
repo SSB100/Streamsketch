@@ -6,13 +6,18 @@ import type { RealtimeChannel } from "@supabase/supabase-js"
 import type { Drawing } from "@/lib/types"
 
 type BroadcastPayload = {
-  nuke: { username: string | null; animationId: string }
-  draw: { drawing: Drawing } // Payload for a new drawing
+  nuke: {
+    username: string | null
+    animationId: string
+    nukeTimestamp: number // Add timestamp to nuke event
+  }
+  draw: { drawing: Drawing }
 }
 
 type UseRealtimeChannelOptions = {
   onNukeBroadcast: (payload: BroadcastPayload["nuke"]) => void
-  onDrawBroadcast: (payload: BroadcastPayload["draw"]) => void // Callback for a new drawing
+  onDrawBroadcast: (payload: BroadcastPayload["draw"]) => void
+  onSubscribed: () => void // Add callback for successful connection/reconnection
 }
 
 export function useRealtimeChannel(sessionId: string | null, options: UseRealtimeChannelOptions) {
@@ -42,7 +47,6 @@ export function useRealtimeChannel(sessionId: string | null, options: UseRealtim
       optionsRef.current.onNukeBroadcast(evt.payload)
     })
 
-    // LISTEN FOR THE TRIGGER: This sets up the listener for the 'draw' event.
     channel.on("broadcast", { event: "draw" }, (evt) => {
       optionsRef.current.onDrawBroadcast(evt.payload)
     })
@@ -50,6 +54,8 @@ export function useRealtimeChannel(sessionId: string | null, options: UseRealtim
     channel.subscribe((status, err) => {
       if (status === "SUBSCRIBED") {
         console.log(`[Realtime] Subscribed: ${channelId}`)
+        // Trigger the callback on successful connection/reconnection
+        optionsRef.current.onSubscribed()
       }
       if (err) {
         console.error(`[Realtime] ${channelId} error:`, err.message)

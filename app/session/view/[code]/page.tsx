@@ -6,7 +6,7 @@ import { Canvas, type CanvasHandle } from "@/components/whiteboard/canvas"
 import { NukeAnimationOverlay } from "@/components/whiteboard/nuke-animation-overlay"
 import { useRealtimeChannel } from "@/hooks/use-realtime-channel"
 import { getSessionData } from "@/app/actions"
-import { Copy, Eye, Maximize, Minimize, RefreshCw, Loader2 } from "lucide-react"
+import { Copy, Eye, Maximize, Minimize, RefreshCw, Loader2, Wifi, WifiOff } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 
@@ -16,35 +16,47 @@ export default function ViewPage({ params }: { params: { code: string } }) {
   const [isLoading, setIsLoading] = useState(true)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [nukeEvent, setNukeEvent] = useState<{ username: string | null; animationId: string } | null>(null)
+  const [connectionStatus, setConnectionStatus] = useState<"connected" | "disconnected" | "reconnecting">("connected")
 
   const canvasRef = useRef<CanvasHandle>(null)
   const fullscreenContainerRef = useRef<HTMLDivElement>(null)
+  const lastNukeTimestampRef = useRef<number>(0)
+  const isInitialSubscription = useRef(true)
 
   // --- Realtime Channel Handlers ---
   const handleIncomingDraw = useCallback(({ drawing }: { drawing: Drawing }) => {
-    // This function is called when a 'draw' broadcast is received.
-    // It updates the local state, and the canvas re-renders with the new line.
-    setDrawings((prev) => [...prev, drawing])
+    // Prevent "ghost lines" by ignoring drawings created before the last nuke
+    if (new Date(drawing.created_at).getTime() < lastNukeTimestampRef.current) {
+      console.log("[Realtime] Ignored stale drawing from before last nuke.")
+      return
+    }
+
+    // Use the canvas method to add the drawing for better performance
+    setDrawings((prev) => {
+      if (prev.some((d) => d.id === drawing.id)) {
+        return prev // Already have this drawing, do nothing
+      }
+      return [...prev, drawing]
+    })
   }, [])
 
   const handleIncomingNuke = useCallback(
-    ({ username, animationId }: { username: string | null; animationId: string }) => {
-      setDrawings([]) // Clear state
-      canvasRef.current?.clearCanvas() // Clear canvas imperatively
+    ({
+      username,
+      animationId,
+      nukeTimestamp,
+    }: {
+      username: string | null
+      animationId: string
+      nukeTimestamp: number
+    }) => {
+      lastNukeTimestampRef.current = nukeTimestamp // Record nuke time
+      setDrawings([])
+      canvasRef.current?.clearCanvas()
       setNukeEvent({ username, animationId })
     },
     [],
   )
-
-  const channelOptions = useMemo(
-    () => ({
-      onNukeBroadcast: handleIncomingNuke,
-      onDrawBroadcast: handleIncomingDraw,
-    }),
-    [handleIncomingNuke, handleIncomingDraw],
-  )
-
-  useRealtimeChannel(session?.id ?? null, channelOptions)
 
   // --- Manual Sync & Initial Load ---
   const refreshAllDrawings = useCallback(async () => {
@@ -52,7 +64,8 @@ export default function ViewPage({ params }: { params: { code: string } }) {
     setIsLoading(true)
     try {
       const { drawings: serverDrawings } = await getSessionData(params.code)
-      setDrawings(serverDrawings)
+      setDrawings([]) // Clear existing drawings
+      setDrawings(serverDrawings) // Set the new, correct state
       toast.success("Canvas synced successfully!")
     } catch (err) {
       console.error("Failed to refresh drawings:", err)
@@ -62,9 +75,44 @@ export default function ViewPage({ params }: { params: { code: string } }) {
     }
   }, [session, params.code])
 
+  const handleSubscription = useCallback(() => {
+    if (isInitialSubscription.current) {
+      isInitialSubscription.current = false
+      setConnectionStatus("connected")
+      return
+    }
+    console.log("[Realtime] Reconnected. Syncing canvas state...")
+    setConnectionStatus("connected")
+    toast.success("Reconnected! Syncing canvas state...")
+    refreshAllDrawings()
+  }, [refreshAllDrawings])
+
+  // Simulate connection status tracking
   useEffect(() => {
-    // This useEffect only runs once to load the initial state of the canvas.
-    // There is NO setInterval or polling here.
+    const handleOnline = () => setConnectionStatus("connected")
+    const handleOffline = () => setConnectionStatus("disconnected")
+
+    window.addEventListener("online", handleOnline)
+    window.addEventListener("offline", handleOffline)
+
+    return () => {
+      window.removeEventListener("online", handleOnline)
+      window.removeEventListener("offline", handleOffline)
+    }
+  }, [])
+
+  const channelOptions = useMemo(
+    () => ({
+      onNukeBroadcast: handleIncomingNuke,
+      onDrawBroadcast: handleIncomingDraw,
+      onSubscribed: handleSubscription,
+    }),
+    [handleIncomingNuke, handleIncomingDraw, handleSubscription],
+  )
+
+  useRealtimeChannel(session?.id ?? null, channelOptions)
+
+  useEffect(() => {
     const fetchInitialData = async () => {
       setIsLoading(true)
       try {
@@ -110,6 +158,41 @@ export default function ViewPage({ params }: { params: { code: string } }) {
     toast.success("Copied to clipboard!")
   }
 
+  const ConnectionIndicator = () => {
+    const getStatusColor = () => {
+      switch (connectionStatus) {
+        case "connected":
+          return "text-green-400"
+        case "disconnected":
+          return "text-red-400"
+        case "reconnecting":
+          return "text-yellow-400"
+        default:
+          return "text-gray-400"
+      }
+    }
+
+    const getStatusIcon = () => {
+      switch (connectionStatus) {
+        case "connected":
+          return <Wifi className="h-4 w-4" />
+        case "disconnected":
+          return <WifiOff className="h-4 w-4" />
+        case "reconnecting":
+          return <RefreshCw className="h-4 w-4 animate-spin" />
+        default:
+          return <Wifi className="h-4 w-4" />
+      }
+    }
+
+    return (
+      <div className={`flex items-center gap-1 ${getStatusColor()}`}>
+        {getStatusIcon()}
+        <span className="text-xs font-medium capitalize">{connectionStatus}</span>
+      </div>
+    )
+  }
+
   if (isLoading && drawings.length === 0) {
     return <div className="flex h-screen w-full items-center justify-center bg-deep-space text-white">Loading...</div>
   }
@@ -128,9 +211,14 @@ export default function ViewPage({ params }: { params: { code: string } }) {
       className="relative flex h-screen w-full flex-col items-center justify-center bg-deep-space p-4"
     >
       <NukeAnimationOverlay nukeEvent={nukeEvent} />
-      <div className="absolute left-4 top-4 flex items-center gap-2 rounded-full bg-black/50 px-4 py-2 text-white backdrop-blur-sm">
-        <Eye className="h-5 w-5 text-green-400" />
-        <span className="font-bold">STREAMER VIEW (READ-ONLY)</span>
+      <div className="absolute left-4 top-4 flex items-center gap-4">
+        <div className="flex items-center gap-2 rounded-full bg-black/50 px-4 py-2 text-white backdrop-blur-sm">
+          <Eye className="h-5 w-5 text-green-400" />
+          <span className="font-bold">STREAMER VIEW (READ-ONLY)</span>
+        </div>
+        <div className="rounded-full bg-black/50 px-3 py-2 backdrop-blur-sm">
+          <ConnectionIndicator />
+        </div>
       </div>
       <div className="absolute right-4 top-4 flex items-center gap-4">
         <Button variant="outline" size="sm" onClick={refreshAllDrawings} disabled={isLoading}>

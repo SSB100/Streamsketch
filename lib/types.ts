@@ -8,4 +8,5 @@ export type Drawing = {
     lineWidth: number
   }
   drawer_wallet_address: string
+  created_at: string // Add timestamp for race condition handling
 }

@@ -16,9 +16,9 @@ import {
   getUserData,
   getFreeCreditsForSession,
   recordDrawingAction,
-  initiateNukeAction, // <-- Import the new action
+  initiateNukeAction,
 } from "@/app/actions"
-import { Rocket, Edit, Bomb, RefreshCw } from "lucide-react"
+import { Rocket, Edit, Bomb, RefreshCw, Wifi, WifiOff } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import {
@@ -50,28 +50,69 @@ function DrawPageContent({ params }: { params: { code: string } }) {
   const [nukeEvent, setNukeEvent] = useState<{ username: string | null; animationId: string } | null>(null)
   const [color, setColor] = useState("#FFFFFF")
   const [brushSize, setBrushSize] = useState(5)
+  const [connectionStatus, setConnectionStatus] = useState<"connected" | "disconnected" | "reconnecting">("connected")
 
   const canvasRef = useRef<CanvasHandle>(null)
+  const lastNukeTimestampRef = useRef<number>(0)
+  const drawStartTimeRef = useRef<number>(0)
+  const isInitialSubscription = useRef(true)
 
-  // This handler is now triggered by the server broadcast, ensuring all clients are in sync.
+  // Track pending optimistic drawings
+  const pendingDrawingsRef = useRef<
+    Map<
+      number,
+      {
+        drawing: Drawing
+        promise: Promise<{ success: boolean; error?: string }>
+        retryCount: number
+      }
+    >
+  >(new Map())
+  const nextTempIdRef = useRef(1)
+
+  const handleIncomingDraw = useCallback(({ drawing }: { drawing: Drawing }) => {
+    // Check if this drawing was one of our optimistic predictions
+    const tempId = Array.from(pendingDrawingsRef.current.entries()).find(
+      ([_, pending]) =>
+        pending.drawing.drawer_wallet_address === drawing.drawer_wallet_address &&
+        JSON.stringify(pending.drawing.drawing_data) === JSON.stringify(drawing.drawing_data),
+    )?.[0]
+
+    if (tempId) {
+      // This is our drawing confirmed by server - convert from optimistic to confirmed
+      canvasRef.current?.confirmOptimisticDrawing(tempId, drawing)
+      pendingDrawingsRef.current.delete(tempId)
+    } else {
+      // This is someone else's drawing - add it normally
+      setDrawings((prev) => {
+        if (prev.some((d) => d.id === drawing.id)) {
+          return prev // Already have this drawing
+        }
+        return [...prev, drawing]
+      })
+    }
+  }, [])
+
   const handleIncomingNuke = useCallback(
-    ({ username, animationId }: { username: string | null; animationId: string }) => {
-      setDrawings([]) // Clear local drawings state array
-      canvasRef.current?.clearCanvas() // Clear the visual canvas
-      setNukeEvent({ username, animationId }) // Trigger the animation overlay
+    ({
+      username,
+      animationId,
+      nukeTimestamp,
+    }: {
+      username: string | null
+      animationId: string
+      nukeTimestamp: number
+    }) => {
+      lastNukeTimestampRef.current = nukeTimestamp
+      setDrawings([])
+      canvasRef.current?.clearCanvas()
+      setNukeEvent({ username, animationId })
+
+      // Clear all pending optimistic drawings since the board was nuked
+      pendingDrawingsRef.current.clear()
     },
     [],
   )
-
-  // The draw page only needs to listen for nukes, not other drawings.
-  const channelOptions = useMemo(
-    () => ({
-      onNukeBroadcast: handleIncomingNuke,
-      onDrawBroadcast: () => {}, // No-op
-    }),
-    [handleIncomingNuke],
-  )
-  useRealtimeChannel(session?.id ?? null, channelOptions)
 
   const refreshUserData = useCallback(async () => {
     if (!publicKey || !session) return
@@ -91,6 +132,61 @@ function DrawPageContent({ params }: { params: { code: string } }) {
       toast.error("Could not refresh your credit balance.")
     }
   }, [publicKey, session])
+
+  const syncCanvasState = useCallback(async () => {
+    if (!session) return
+    console.log("[Sync] Fetching latest canvas state...")
+    try {
+      const { drawings: serverDrawings } = await getSessionData(params.code)
+      setDrawings(serverDrawings)
+      // If we are re-syncing, our optimistic drawings are now invalid.
+      // The server state is the source of truth.
+      if (pendingDrawingsRef.current.size > 0) {
+        pendingDrawingsRef.current.clear()
+        toast.info("Cleared pending drawings after re-sync.")
+      }
+    } catch (err) {
+      console.error("Failed to sync canvas state:", err)
+      toast.error("Could not re-sync canvas state.")
+    }
+  }, [session, params.code])
+
+  const handleSubscription = useCallback(() => {
+    if (isInitialSubscription.current) {
+      isInitialSubscription.current = false
+      setConnectionStatus("connected")
+      return
+    }
+    console.log("[Realtime] Reconnected. Syncing canvas and user data...")
+    setConnectionStatus("connected")
+    toast.success("Reconnected to server!")
+    refreshUserData()
+    syncCanvasState()
+  }, [refreshUserData, syncCanvasState])
+
+  // Simulate connection status tracking (in a real app, you'd get this from Supabase)
+  useEffect(() => {
+    const handleOnline = () => setConnectionStatus("connected")
+    const handleOffline = () => setConnectionStatus("disconnected")
+
+    window.addEventListener("online", handleOnline)
+    window.addEventListener("offline", handleOffline)
+
+    return () => {
+      window.removeEventListener("online", handleOnline)
+      window.removeEventListener("offline", handleOffline)
+    }
+  }, [])
+
+  const channelOptions = useMemo(
+    () => ({
+      onNukeBroadcast: handleIncomingNuke,
+      onDrawBroadcast: handleIncomingDraw,
+      onSubscribed: handleSubscription,
+    }),
+    [handleIncomingNuke, handleIncomingDraw, handleSubscription],
+  )
+  useRealtimeChannel(session?.id ?? null, channelOptions)
 
   useEffect(() => {
     const bootstrap = async () => {
@@ -129,27 +225,96 @@ function DrawPageContent({ params }: { params: { code: string } }) {
       toast.error("You are out of line credits!")
       return false
     }
+    drawStartTimeRef.current = Date.now()
     return true
   }
 
+  const retryFailedDrawing = useCallback(
+    async (tempId: number) => {
+      const pending = pendingDrawingsRef.current.get(tempId)
+      if (!pending || !session || !publicKey) return
+
+      if (pending.retryCount >= 3) {
+        // Max retries reached - remove optimistic drawing and show error
+        canvasRef.current?.removeOptimisticDrawing(tempId)
+        pendingDrawingsRef.current.delete(tempId)
+        toast.error("Failed to save drawing after multiple attempts. Please check your connection.")
+        await refreshUserData() // Refresh credits since the drawing failed
+        return
+      }
+
+      // Retry the drawing
+      const retryPromise = recordDrawingAction(publicKey.toBase58(), session.id, pending.drawing.drawing_data)
+
+      pendingDrawingsRef.current.set(tempId, {
+        ...pending,
+        promise: retryPromise,
+        retryCount: pending.retryCount + 1,
+      })
+
+      try {
+        const result = await retryPromise
+        if (!result.success) {
+          // Schedule another retry
+          setTimeout(() => retryFailedDrawing(tempId), 2000 * pending.retryCount)
+        }
+      } catch (err) {
+        // Schedule another retry
+        setTimeout(() => retryFailedDrawing(tempId), 2000 * pending.retryCount)
+      }
+    },
+    [session, publicKey, refreshUserData],
+  )
+
   const handleDrawEnd = async (line: Omit<Drawing["drawing_data"], "drawer_wallet_address">) => {
     if (!publicKey || !session) return
+
+    // Prevent sending a drawing that was started before the last nuke
+    if (drawStartTimeRef.current < lastNukeTimestampRef.current) {
+      toast.info("The board was cleared while you were drawing. Your line was not saved.")
+      return
+    }
+
+    // Create optimistic drawing with temporary ID
+    const tempId = nextTempIdRef.current++
     const optimisticDrawing: Drawing = {
-      id: Date.now(),
+      id: tempId,
       drawer_wallet_address: publicKey.toBase58(),
       drawing_data: line,
+      created_at: new Date().toISOString(),
     }
-    setDrawings((prev) => [...prev, optimisticDrawing])
+
+    // Immediately show the drawing optimistically
+    canvasRef.current?.addOptimisticDrawing(optimisticDrawing)
+
+    // Optimistically update credits
     setCredits((p) => (p.freeLines > 0 ? { ...p, freeLines: p.freeLines - 1 } : { ...p, paidLines: p.paidLines - 1 }))
-    const { success, error } = await recordDrawingAction(publicKey.toBase58(), session.id, line)
-    if (!success) {
-      toast.error("Failed to save drawing", { description: error })
-      setDrawings((prev) => prev.filter((d) => d.id !== optimisticDrawing.id))
-      await refreshUserData()
+
+    // Start the server request
+    const serverPromise = recordDrawingAction(publicKey.toBase58(), session.id, line)
+
+    // Track this pending drawing
+    pendingDrawingsRef.current.set(tempId, {
+      drawing: optimisticDrawing,
+      promise: serverPromise,
+      retryCount: 0,
+    })
+
+    try {
+      const result = await serverPromise
+      if (!result.success) {
+        // Server rejected the drawing - start retry logic
+        console.warn("Drawing rejected by server, starting retry:", result.error)
+        setTimeout(() => retryFailedDrawing(tempId), 1000)
+      }
+      // If successful, the drawing will be confirmed via real-time broadcast
+    } catch (error) {
+      console.error("Drawing request failed:", error)
+      // Start retry logic
+      setTimeout(() => retryFailedDrawing(tempId), 1000)
     }
   }
 
-  // --- NEW Nuke Handler ---
   const handleNuke = async (animation: NukeAnimation) => {
     if (!publicKey || !wallet || !sendTransaction || !session) {
       toast.error("Wallet not fully connected or session invalid.")
@@ -161,7 +326,6 @@ function DrawPageContent({ params }: { params: { code: string } }) {
 
     try {
       if (animation.id !== "free_nuke") {
-        // Handle payment for paid nukes
         const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed")
         const transaction = new Transaction({ feePayer: publicKey, blockhash, lastValidBlockHeight }).add(
           SystemProgram.transfer({
@@ -176,12 +340,11 @@ function DrawPageContent({ params }: { params: { code: string } }) {
         toast.success("Payment confirmed! Nuking the board...")
       }
 
-      // Call the single, authoritative server action
       result = await initiateNukeAction(publicKey.toBase58(), session.id, animation, signature)
 
       if (result.success) {
         setIsNukeDialogOpen(false)
-        await refreshUserData() // Refresh credits
+        await refreshUserData()
       } else {
         toast.error("Failed to trigger nuke.", { description: result.error })
       }
@@ -202,12 +365,52 @@ function DrawPageContent({ params }: { params: { code: string } }) {
     )
   }
 
+  const ConnectionIndicator = () => {
+    const getStatusColor = () => {
+      switch (connectionStatus) {
+        case "connected":
+          return "text-green-400"
+        case "disconnected":
+          return "text-red-400"
+        case "reconnecting":
+          return "text-yellow-400"
+        default:
+          return "text-gray-400"
+      }
+    }
+
+    const getStatusIcon = () => {
+      switch (connectionStatus) {
+        case "connected":
+          return <Wifi className="h-4 w-4" />
+        case "disconnected":
+          return <WifiOff className="h-4 w-4" />
+        case "reconnecting":
+          return <RefreshCw className="h-4 w-4 animate-spin" />
+        default:
+          return <Wifi className="h-4 w-4" />
+      }
+    }
+
+    return (
+      <div className={`flex items-center gap-1 ${getStatusColor()}`}>
+        {getStatusIcon()}
+        <span className="text-xs font-medium capitalize">{connectionStatus}</span>
+      </div>
+    )
+  }
+
   return (
     <main className="flex h-screen flex-col items-center justify-center bg-deep-space gap-4 p-4">
       <NukeAnimationOverlay nukeEvent={nukeEvent} />
-      <div className="absolute left-4 top-4 flex items-center gap-2 rounded-full bg-black/50 px-4 py-2 text-white">
-        <Edit className="h-5 w-5 text-neon-pink" />
-        <span className="font-bold">DRAWING MODE</span>
+      <div className="absolute left-4 top-4 flex items-center gap-4">
+        <div className="flex items-center gap-2 rounded-full bg-black/50 px-4 py-2 text-white">
+          <Edit className="h-5 w-5 text-neon-pink" />
+          <span className="font-bold">DRAWING MODE</span>
+        </div>
+        <div className="rounded-full bg-black/50 px-3 py-2">
+          <ConnectionIndicator />
+        </div>
       </div>
       <div className="absolute right-4 top-4">
         <Button variant="outline" size="sm" onClick={() => window.location.reload()}>

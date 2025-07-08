@@ -266,7 +266,7 @@ export async function getSessionData(shortCode: string) {
   if (sessionError || !session) return { session: null, drawings: [] }
   const { data: drawings, error: drawingsError } = await supabase
     .from("drawings")
-    .select("id, drawing_data, drawer_wallet_address")
+    .select("id, drawing_data, drawer_wallet_address, created_at") // Ensure created_at is selected
     .eq("session_id", session.id)
     .order("id", { ascending: true })
   if (drawingsError) throw new Error(drawingsError.message)
@@ -439,26 +439,19 @@ export async function recordDrawingAction(
         event: "draw",
         payload: { drawing: newDrawing },
       })
-      .catch(console.error)
+      .catch((err) => console.error(`[Realtime Broadcast Failed] Event: draw, Session: ${sessionId}`, err))
   }
   revalidatePath("/dashboard")
   return { success: true }
 }
 
-/**
- * A consolidated server action to handle all nuke logic.
- * It validates the request, handles credits/payment, broadcasts the nuke event,
- * and triggers background cleanup. This is the single source of truth for nukes.
- */
 export async function initiateNukeAction(
   nukerWalletAddress: string,
   sessionId: string,
   nukeAnimation: NukeAnimation,
-  txSignature?: string, // Optional: for paid nukes
+  txSignature?: string,
 ) {
   const supabase = createSupabaseAdminClient()
-
-  // Get nuker's username for the broadcast message
   const { data: nukerData } = await supabase
     .from("users")
     .select("username")
@@ -466,9 +459,7 @@ export async function initiateNukeAction(
     .single()
   const nukerUsername = nukerData?.username || "A mysterious user"
 
-  // --- Handle Free vs. Paid Nuke Logic ---
   if (nukeAnimation.id === "free_nuke") {
-    // Decrement the user's free nuke credit for this session
     const { error: decrementError } = await supabase.rpc("decrement_session_free_nuke_credit", {
       p_nuker_wallet_address: nukerWalletAddress,
       p_session_id: sessionId,
@@ -476,24 +467,18 @@ export async function initiateNukeAction(
     if (decrementError) {
       return { success: false, error: `Failed to use free nuke: ${decrementError.message}` }
     }
-    // Trigger the background cleanup (fire-and-forget)
     supabase
       .rpc("perform_free_nuke_cleanup", {
         p_nuker_wallet_address: nukerWalletAddress,
         p_session_id: sessionId,
       })
       .then(({ error }) => {
-        if (error) console.error(`[Background Free Nuke Cleanup Failed]`, error)
+        if (error) console.error(`[Background Free Nuke Cleanup Failed] Session: ${sessionId}`, error)
       })
   } else {
-    // This is a paid nuke
     if (!txSignature) {
       return { success: false, error: "Transaction signature is required for paid nukes." }
     }
-    // NOTE: In a production app, you would re-verify the transaction here
-    // to ensure it's valid before proceeding. We'll skip for brevity.
-
-    // Trigger the background cleanup and revenue distribution (fire-and-forget)
     supabase
       .rpc("perform_nuke_cleanup", {
         p_nuker_wallet_address: nukerWalletAddress,
@@ -502,10 +487,8 @@ export async function initiateNukeAction(
         p_streamer_share_rate: STREAMER_REVENUE_SHARE,
       })
       .then(({ error }) => {
-        if (error) console.error(`[Background Paid Nuke Cleanup Failed]`, error)
+        if (error) console.error(`[Background Paid Nuke Cleanup Failed] Session: ${sessionId}`, error)
       })
-
-    // Log the paid transaction (fire-and-forget)
     supabase
       .from("transactions")
       .insert({
@@ -516,16 +499,18 @@ export async function initiateNukeAction(
         notes: `Purchased ${nukeAnimation.name} for session ${sessionId}`,
       })
       .then(({ error }) => {
-        if (error) console.error(`[Paid Nuke Logging Failed]`, error)
+        if (error) console.error(`[Paid Nuke Logging Failed] Session: ${sessionId}`, error)
       })
   }
 
-  // --- Authoritative Broadcast ---
-  // After handling the logic, broadcast the event to all clients.
   await supabase.channel(`session-${sessionId}`).send({
     type: "broadcast",
     event: "nuke",
-    payload: { username: nukerUsername, animationId: nukeAnimation.id },
+    payload: {
+      username: nukerUsername,
+      animationId: nukeAnimation.id,
+      nukeTimestamp: Date.now(), // Add timestamp to broadcast
+    },
   })
 
   revalidatePath("/dashboard")
