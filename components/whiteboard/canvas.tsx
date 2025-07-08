@@ -2,7 +2,7 @@
 
 import type React from "react"
 import { useRef, useEffect, forwardRef, useImperativeHandle } from "react"
-import type { Point, Drawing } from "@/lib/types"
+import type { Point, Drawing, Stroke } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 interface CanvasProps {
@@ -10,9 +10,8 @@ interface CanvasProps {
   height: number
   isDrawable: boolean
   initialDrawings?: Drawing[]
-  onDraw: (drawing: Omit<Drawing, "drawer_wallet_address">) => void
   onDrawStart: () => void
-  onDrawEnd: () => void
+  onDrawEnd: (stroke: Stroke) => void
   color?: string
   lineWidth?: number
   className?: string
@@ -31,7 +30,6 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(
       height,
       isDrawable,
       initialDrawings = [],
-      onDraw,
       onDrawStart,
       onDrawEnd,
       color = "#FFFFFF",
@@ -42,7 +40,8 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(
   ) => {
     const canvasRef = useRef<HTMLCanvasElement>(null)
     const lastPointRef = useRef<Point | null>(null)
-    const isDrawingRef = useRef(false) // Internal state to track mouse down
+    const isDrawingRef = useRef(false)
+    const currentSegmentsRef = useRef<{ from: Point; to: Point }[]>([])
 
     const getCanvasContext = () => canvasRef.current?.getContext("2d")
 
@@ -58,6 +57,12 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(
       ctx.stroke()
     }
 
+    const drawStroke = (stroke: Stroke) => {
+      stroke.segments.forEach((segment) => {
+        drawLine(segment.from, segment.to, stroke.color, stroke.lineWidth)
+      })
+    }
+
     useImperativeHandle(ref, () => ({
       clearCanvas: () => {
         const ctx = getCanvasContext()
@@ -66,16 +71,23 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(
         }
       },
       drawFromBroadcast: (drawing: Drawing) => {
-        if (drawing && drawing.drawing_data && drawing.drawing_data.from && drawing.drawing_data.to) {
-          const { from, to, color: lineColor, lineWidth: lineW } = drawing.drawing_data
-          drawLine(from, to, lineColor, lineW)
+        if (drawing && drawing.drawing_data && drawing.drawing_data.segments) {
+          drawStroke(drawing.drawing_data)
         }
       },
       forceStopDrawing: () => {
         if (isDrawingRef.current) {
           isDrawingRef.current = false
           lastPointRef.current = null
-          onDrawEnd() // Trigger the parent's end-of-draw logic
+          if (currentSegmentsRef.current.length > 0) {
+            const stroke: Stroke = {
+              color,
+              lineWidth,
+              segments: currentSegmentsRef.current,
+            }
+            onDrawEnd(stroke)
+          }
+          currentSegmentsRef.current = []
         }
       },
     }))
@@ -85,9 +97,8 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(
       if (!ctx) return
       ctx.clearRect(0, 0, width, height)
       initialDrawings.forEach((d) => {
-        if (d && d.drawing_data && d.drawing_data.from && d.drawing_data.to) {
-          const { from, to, color: lineColor, lineWidth: lineW } = d.drawing_data
-          drawLine(from, to, lineColor, lineW)
+        if (d && d.drawing_data && d.drawing_data.segments) {
+          drawStroke(d.drawing_data)
         }
       })
     }, [initialDrawings, width, height])
@@ -105,6 +116,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(
     const handleMouseDown = (e: React.MouseEvent | React.TouchEvent) => {
       if (!isDrawable) return
       isDrawingRef.current = true
+      currentSegmentsRef.current = []
       const point = getPoint(e)
       if (point) {
         lastPointRef.current = point
@@ -117,9 +129,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(
       const currentPoint = getPoint(e)
       if (currentPoint) {
         drawLine(lastPointRef.current, currentPoint, color, lineWidth)
-        onDraw({
-          drawing_data: { from: lastPointRef.current, to: currentPoint, color, lineWidth },
-        })
+        currentSegmentsRef.current.push({ from: lastPointRef.current, to: currentPoint })
         lastPointRef.current = currentPoint
       }
     }
@@ -128,7 +138,15 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(
       if (!isDrawingRef.current) return
       isDrawingRef.current = false
       lastPointRef.current = null
-      onDrawEnd()
+      if (currentSegmentsRef.current.length > 0) {
+        const stroke: Stroke = {
+          color,
+          lineWidth,
+          segments: currentSegmentsRef.current,
+        }
+        onDrawEnd(stroke)
+      }
+      currentSegmentsRef.current = []
     }
 
     return (

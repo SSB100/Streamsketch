@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from "react"
 import { useConnection, useWallet } from "@solana/wallet-adapter-react"
 import { SystemProgram, Transaction, LAMPORTS_PER_SOL } from "@solana/web3.js"
-import type { Drawing } from "@/lib/types"
+import type { Drawing, Stroke } from "@/lib/types"
 import { Canvas, type CanvasHandle } from "@/components/whiteboard/canvas"
 import { ColorPicker } from "@/components/whiteboard/color-picker"
 import { BrushSizePicker } from "@/components/whiteboard/brush-size-picker"
@@ -16,7 +16,7 @@ import {
   getUserData,
   processNukePurchase,
   getFreeCreditsForSession,
-  spendCreditAndDrawStrokeAction, // Import the new action
+  spendCreditAndDrawStrokeAction,
 } from "@/app/actions"
 import { Rocket, Edit, Bomb } from "lucide-react"
 import { toast } from "sonner"
@@ -34,9 +34,6 @@ import { APP_WALLET_ADDRESS } from "@/lib/constants"
 import { useFreeNukeAction } from "@/hooks/use-free-nuke-action"
 import { ErrorBoundary } from "@/components/error-boundary"
 
-type DrawingSegment = Omit<Drawing, "id">
-
-const BROADCAST_INTERVAL_MS = 200 // Increased interval to reduce broadcast chattiness
 const DRAWING_TIME_LIMIT_MS = 5000
 
 function DrawPageContent({ params }: { params: { code: string } }) {
@@ -61,15 +58,12 @@ function DrawPageContent({ params }: { params: { code: string } }) {
   const [brushSize, setBrushSize] = useState(5)
 
   const canvasRef = useRef<CanvasHandle>(null)
-  const broadcastBufferRef = useRef<DrawingSegment[]>([])
-  const currentStrokeRef = useRef<DrawingSegment[]>([])
-  const broadcastIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const drawingTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
-  const handleIncomingDrawBatch = useCallback(
-    ({ segments }: { segments: Drawing[] }) => {
-      if (segments[0]?.drawer_wallet_address !== publicKey?.toBase58()) {
-        segments.forEach((drawing) => canvasRef.current?.drawFromBroadcast(drawing))
+  const handleIncomingStroke = useCallback(
+    ({ stroke }: { stroke: Drawing }) => {
+      if (stroke.drawer_wallet_address !== publicKey?.toBase58()) {
+        canvasRef.current?.drawFromBroadcast(stroke)
       }
     },
     [publicKey],
@@ -84,8 +78,8 @@ function DrawPageContent({ params }: { params: { code: string } }) {
   )
 
   const channelOptions = useMemo(
-    () => ({ onDrawBatchBroadcast: handleIncomingDrawBatch, onNukeBroadcast: handleIncomingNuke }),
-    [handleIncomingDrawBatch, handleIncomingNuke],
+    () => ({ onStrokeBroadcast: handleIncomingStroke, onNukeBroadcast: handleIncomingNuke }),
+    [handleIncomingStroke, handleIncomingNuke],
   )
   const channel = useRealtimeChannel(session?.id ?? null, channelOptions)
 
@@ -106,16 +100,6 @@ function DrawPageContent({ params }: { params: { code: string } }) {
       console.error("Failed to refresh user data:", err)
     }
   }, [publicKey, session])
-
-  const resetCanvasToTruth = useCallback(async () => {
-    try {
-      const { drawings: serverDrawings } = await getSessionData(params.code)
-      setInitialDrawings(serverDrawings)
-    } catch (err) {
-      console.error("Failed to reset canvas to server state:", err)
-      toast.error("Could not sync with the server. Please refresh.")
-    }
-  }, [params.code])
 
   useEffect(() => {
     async function bootstrap() {
@@ -152,37 +136,32 @@ function DrawPageContent({ params }: { params: { code: string } }) {
     }
   }, [params.code, publicKey, refreshUserData, session])
 
-  const broadcastDrawingSegments = useCallback(() => {
-    if (broadcastBufferRef.current.length > 0 && channel) {
-      const segmentsToSend = [...broadcastBufferRef.current]
-      broadcastBufferRef.current = []
-      channel.send({ type: "broadcast", event: "draw_batch", payload: { segments: segmentsToSend } })
-    }
-  }, [channel])
+  const handleDrawEnd = useCallback(
+    async (stroke: Stroke) => {
+      if (drawingTimeoutRef.current) clearTimeout(drawingTimeoutRef.current)
+      if (!publicKey || !session || stroke.segments.length === 0) {
+        return
+      }
 
-  const handleDrawEnd = useCallback(async () => {
-    if (broadcastIntervalRef.current) clearInterval(broadcastIntervalRef.current)
-    if (drawingTimeoutRef.current) clearTimeout(drawingTimeoutRef.current)
-    broadcastDrawingSegments()
+      if (channel) {
+        const drawingToBroadcast: Omit<Drawing, "id"> = {
+          drawer_wallet_address: publicKey.toBase58(),
+          drawing_data: stroke,
+        }
+        channel.send({ type: "broadcast", event: "stroke", payload: { stroke: drawingToBroadcast } })
+      }
 
-    if (!publicKey || !session || currentStrokeRef.current.length === 0) {
-      currentStrokeRef.current = []
-      return
-    }
+      const res = await spendCreditAndDrawStrokeAction(publicKey.toBase58(), session.id, stroke)
 
-    const strokeToSave = [...currentStrokeRef.current]
-    currentStrokeRef.current = []
-
-    const res = await spendCreditAndDrawStrokeAction(publicKey.toBase58(), session.id, strokeToSave)
-
-    if (res.success) {
-      await refreshUserData()
-    } else {
-      toast.error("Your drawing failed to save.", { description: res.error || "Please try again." })
-      await resetCanvasToTruth()
-      await refreshUserData()
-    }
-  }, [broadcastDrawingSegments, publicKey, session, resetCanvasToTruth, refreshUserData])
+      if (res.success) {
+        await refreshUserData()
+      } else {
+        toast.error("Your drawing failed to save.", { description: res.error || "Please try again." })
+        await refreshUserData()
+      }
+    },
+    [publicKey, session, channel, refreshUserData],
+  )
 
   const handleDrawStart = () => {
     if (credits.paidLines < 1 && credits.freeLines < 1) {
@@ -191,31 +170,17 @@ function DrawPageContent({ params }: { params: { code: string } }) {
       return
     }
 
-    // Optimistically decrement UI
     if (credits.freeLines > 0) {
       setCredits((p) => ({ ...p, freeLines: p.freeLines - 1 }))
     } else {
       setCredits((p) => ({ ...p, paidLines: p.paidLines - 1 }))
     }
 
-    currentStrokeRef.current = []
-    broadcastBufferRef.current = []
-
-    if (broadcastIntervalRef.current) clearInterval(broadcastIntervalRef.current)
-    broadcastIntervalRef.current = setInterval(broadcastDrawingSegments, BROADCAST_INTERVAL_MS)
-
     if (drawingTimeoutRef.current) clearTimeout(drawingTimeoutRef.current)
     drawingTimeoutRef.current = setTimeout(() => {
       toast.info("Drawing time limit reached (5 seconds).")
       canvasRef.current?.forceStopDrawing()
     }, DRAWING_TIME_LIMIT_MS)
-  }
-
-  const handleDraw = (drawing: Omit<Drawing, "drawer_wallet_address" | "id">) => {
-    if (!publicKey || !session) return
-    const newSegment: DrawingSegment = { ...drawing, drawer_wallet_address: publicKey.toBase58() }
-    broadcastBufferRef.current.push(newSegment)
-    currentStrokeRef.current.push(newSegment)
   }
 
   const handleNuke = async (animation: NukeAnimation) => {
@@ -309,7 +274,6 @@ function DrawPageContent({ params }: { params: { code: string } }) {
         isDrawable={!!publicKey}
         initialDrawings={initialDrawings}
         onDrawStart={handleDrawStart}
-        onDraw={handleDraw}
         onDrawEnd={handleDrawEnd}
         color={color}
         lineWidth={brushSize}

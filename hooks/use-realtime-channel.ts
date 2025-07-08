@@ -5,25 +5,17 @@ import { useSupabase } from "@/components/providers/supabase-provider"
 import type { RealtimeChannel } from "@supabase/supabase-js"
 import type { Drawing } from "@/lib/types"
 
-type BroadcastPayload = {
-  draw_batch: { segments: Drawing[] }
-  nuke: { username: string | null; animationId: string }
+interface ChannelOptions {
+  onStrokeBroadcast?: (payload: { stroke: Drawing }) => void
+  onNukeBroadcast?: (payload: { username: string | null; animationId: string }) => void
 }
 
-type UseRealtimeChannelOptions = {
-  onDrawBatchBroadcast: (payload: BroadcastPayload["draw_batch"]) => void
-  onNukeBroadcast: (payload: BroadcastPayload["nuke"]) => void
-}
-
-/**
- * Pure-WebSocket channel (broadcast only) – avoids replication-slot errors.
- */
-export function useRealtimeChannel(sessionId: string | null, options: UseRealtimeChannelOptions) {
+export function useRealtimeChannel(sessionId: string | null, options: ChannelOptions) {
   const supabase = useSupabase()
   const channelRef = useRef<RealtimeChannel | null>(null)
   const optionsRef = useRef(options)
 
-  // Update options ref when they change
+  // Update options ref when they change to avoid re-subscribing
   useEffect(() => {
     optionsRef.current = options
   }, [options])
@@ -32,7 +24,6 @@ export function useRealtimeChannel(sessionId: string | null, options: UseRealtim
 
   useEffect(() => {
     if (!channelId) {
-      // Clean up existing channel if sessionId becomes null
       if (channelRef.current) {
         supabase.removeChannel(channelRef.current)
         channelRef.current = null
@@ -40,30 +31,31 @@ export function useRealtimeChannel(sessionId: string | null, options: UseRealtim
       return
     }
 
-    // Create new channel
-    const channel = supabase.channel(channelId)
+    const channel = supabase.channel(channelId, {
+      config: {
+        broadcast: {
+          self: false, // Don't receive our own broadcasts
+        },
+      },
+    })
     channelRef.current = channel
 
-    // Set up event listeners
-    channel.on("broadcast", { event: "draw_batch" }, (evt) => {
-      optionsRef.current.onDrawBatchBroadcast(evt.payload)
-    })
+    channel
+      .on("broadcast", { event: "stroke" }, ({ payload }) => {
+        optionsRef.current.onStrokeBroadcast?.(payload)
+      })
+      .on("broadcast", { event: "nuke" }, ({ payload }) => {
+        optionsRef.current.onNukeBroadcast?.(payload)
+      })
+      .subscribe((status, err) => {
+        if (status === "SUBSCRIBED") {
+          console.log(`[Realtime] Subscribed to ${channelId}`)
+        }
+        if (err) {
+          console.error(`[Realtime] ${channelId} error:`, err.message)
+        }
+      })
 
-    channel.on("broadcast", { event: "nuke" }, (evt) => {
-      optionsRef.current.onNukeBroadcast(evt.payload)
-    })
-
-    // Subscribe to the channel
-    channel.subscribe((status, err) => {
-      if (status === "SUBSCRIBED") {
-        console.log(`[Realtime] Subscribed: ${channelId}`)
-      }
-      if (err) {
-        console.error(`[Realtime] ${channelId} error:`, err.message)
-      }
-    })
-
-    // Cleanup function
     return () => {
       if (channelRef.current) {
         supabase.removeChannel(channelRef.current)
