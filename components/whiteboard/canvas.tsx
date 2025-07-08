@@ -66,8 +66,10 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(
         }
       },
       drawFromBroadcast: (drawing: Drawing) => {
-        const { from, to, color: lineColor, lineWidth: lineW } = drawing.drawing_data
-        drawLine(from, to, lineColor, lineW)
+        if (drawing && drawing.drawing_data && drawing.drawing_data.from && drawing.drawing_data.to) {
+          const { from, to, color: lineColor, lineWidth: lineW } = drawing.drawing_data
+          drawLine(from, to, lineColor, lineW)
+        }
       },
       forceStopDrawing: () => {
         if (isDrawingRef.current) {
@@ -83,8 +85,10 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(
       if (!ctx) return
       ctx.clearRect(0, 0, width, height)
       initialDrawings.forEach((d) => {
-        const { from, to, color: lineColor, lineWidth: lineW } = d.drawing_data
-        drawLine(from, to, lineColor, lineW)
+        if (d && d.drawing_data && d.drawing_data.from && d.drawing_data.to) {
+          const { from, to, color: lineColor, lineWidth: lineW } = d.drawing_data
+          drawLine(from, to, lineColor, lineW)
+        }
       })
     }, [initialDrawings, width, height])
 
