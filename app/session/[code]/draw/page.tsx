@@ -144,7 +144,19 @@ function DrawPageContent({ params }: { params: { code: string } }) {
       }
     }
     bootstrap()
-  }, [params.code, publicKey, refreshUserData])
+
+    // Keep-alive mechanism: Refresh user data every 10 seconds
+    const keepAliveInterval = setInterval(() => {
+      if (publicKey && session) {
+        console.log("[Keep-Alive] Refreshing user data to maintain connection.")
+        refreshUserData()
+      }
+    }, 10000) // 10 seconds
+
+    return () => {
+      clearInterval(keepAliveInterval)
+    }
+  }, [params.code, publicKey, refreshUserData, session])
 
   const broadcastDrawingSegments = useCallback(() => {
     if (broadcastBufferRef.current.length > 0 && channel) {
@@ -162,11 +174,15 @@ function DrawPageContent({ params }: { params: { code: string } }) {
     if (publicKey && session && currentStrokeRef.current.length > 0) {
       addDrawingSegments(session.id, currentStrokeRef.current).catch((err) => {
         console.error("Failed to save full drawing stroke to DB:", err)
-        // Don't toast here, as the spend credit failure is the real source of truth
+        // FIX: Provide immediate feedback and reset the canvas on failure
+        toast.error("Your drawing failed to save. Please try again.", {
+          description: "This can happen due to a temporary network issue.",
+        })
+        resetCanvasToTruth() // Erase the invalid line
       })
     }
     currentStrokeRef.current = []
-  }, [broadcastDrawingSegments, publicKey, session])
+  }, [broadcastDrawingSegments, publicKey, session, resetCanvasToTruth])
 
   const handleDrawStart = () => {
     if (credits.paidLines < 1 && credits.freeLines < 1) {
