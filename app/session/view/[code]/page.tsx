@@ -25,16 +25,13 @@ export default function ViewPage({ params }: { params: { code: string } }) {
 
   // --- Realtime Channel Handlers ---
   const handleIncomingDraw = useCallback(({ drawing }: { drawing: Drawing }) => {
-    // Prevent "ghost lines" by ignoring drawings created before the last nuke
     if (new Date(drawing.created_at).getTime() < lastNukeTimestampRef.current) {
       console.log("[Realtime] Ignored stale drawing from before last nuke.")
       return
     }
-
-    // Use the canvas method to add the drawing for better performance
     setDrawings((prev) => {
       if (prev.some((d) => d.id === drawing.id)) {
-        return prev // Already have this drawing, do nothing
+        return prev
       }
       return [...prev, drawing]
     })
@@ -50,7 +47,7 @@ export default function ViewPage({ params }: { params: { code: string } }) {
       animationId: string
       nukeTimestamp: number
     }) => {
-      lastNukeTimestampRef.current = nukeTimestamp // Record nuke time
+      lastNukeTimestampRef.current = nukeTimestamp
       setDrawings([])
       canvasRef.current?.clearCanvas()
       setNukeEvent({ username, animationId })
@@ -64,8 +61,8 @@ export default function ViewPage({ params }: { params: { code: string } }) {
     setIsLoading(true)
     try {
       const { drawings: serverDrawings } = await getSessionData(params.code)
-      setDrawings([]) // Clear existing drawings
-      setDrawings(serverDrawings) // Set the new, correct state
+      setDrawings([])
+      setDrawings(serverDrawings)
       toast.success("Canvas synced successfully!")
     } catch (err) {
       console.error("Failed to refresh drawings:", err)
@@ -84,17 +81,14 @@ export default function ViewPage({ params }: { params: { code: string } }) {
       toast.info("Reconnected! Syncing canvas...")
     }
     setConnectionStatus("connected")
-    refreshAllDrawings() // Always refresh on subscribe/resubscribe to guarantee state.
+    refreshAllDrawings()
   }, [refreshAllDrawings])
 
-  // Simulate connection status tracking
   useEffect(() => {
     const handleOnline = () => setConnectionStatus("connected")
     const handleOffline = () => setConnectionStatus("disconnected")
-
     window.addEventListener("online", handleOnline)
     window.addEventListener("offline", handleOffline)
-
     return () => {
       window.removeEventListener("online", handleOnline)
       window.removeEventListener("offline", handleOffline)
@@ -137,7 +131,6 @@ export default function ViewPage({ params }: { params: { code: string } }) {
   const toggleFullscreen = () => {
     const elem = fullscreenContainerRef.current
     if (!elem) return
-
     if (!document.fullscreenElement) {
       elem.requestFullscreen().catch((err) => {
         toast.error(`Error attempting to enable full-screen mode: ${err.message} (${err.name})`)
@@ -171,7 +164,6 @@ export default function ViewPage({ params }: { params: { code: string } }) {
           return "text-gray-400"
       }
     }
-
     const getStatusIcon = () => {
       switch (connectionStatus) {
         case "connected":
@@ -184,7 +176,6 @@ export default function ViewPage({ params }: { params: { code: string } }) {
           return <Wifi className="h-4 w-4" />
       }
     }
-
     return (
       <div className={`flex items-center gap-1 ${getStatusColor()}`}>
         {getStatusIcon()}
@@ -192,6 +183,8 @@ export default function ViewPage({ params }: { params: { code: string } }) {
       </div>
     )
   }
+
+  const drawUrl = `https://streamsketch.tech/session/draw/${params.code}`
 
   if (isLoading && drawings.length === 0) {
     return <div className="flex h-screen w-full items-center justify-center bg-deep-space text-white">Loading...</div>
@@ -226,12 +219,9 @@ export default function ViewPage({ params }: { params: { code: string } }) {
           Sync Canvas
         </Button>
         <div className="flex items-center gap-2 rounded-full bg-black/50 px-3 py-2 text-white backdrop-blur-sm">
-          <span className="text-muted-foreground">Session Code:</span>
-          <span className="font-mono text-lg font-bold text-neon-pink">{params.code}</span>
-          <button
-            onClick={() => copyToClipboard(`https://streamsketch.tech/session/draw/${params.code}`)}
-            className="ml-1 transition-transform hover:scale-110"
-          >
+          <span className="text-muted-foreground">Draw URL:</span>
+          <span className="font-mono text-lg font-bold text-neon-pink">{drawUrl}</span>
+          <button onClick={() => copyToClipboard(drawUrl)} className="ml-1 transition-transform hover:scale-110">
             <Copy className="h-4 w-4" />
           </button>
         </div>
@@ -244,7 +234,7 @@ export default function ViewPage({ params }: { params: { code: string } }) {
           isDrawable={false}
           initialDrawings={drawings}
           onDrawStart={() => false}
-          onDrawEnd={() => {}}
+          onEnd={() => {}}
           className="h-full w-full border-white/20"
         />
       </div>
