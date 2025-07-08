@@ -175,7 +175,10 @@ function DrawPageContent({ params }: { params: { code: string } }) {
 
     const res = await spendCreditAndDrawStrokeAction(publicKey.toBase58(), session.id, strokeToSave)
 
-    if (!res.success) {
+    if (res.success) {
+      // On success, refresh the user data to get the new credit count
+      await refreshUserData()
+    } else {
       toast.error("Your drawing failed to save.", { description: res.error || "Please try again." })
       await resetCanvasToTruth()
       await refreshUserData()
@@ -189,12 +192,8 @@ function DrawPageContent({ params }: { params: { code: string } }) {
       return
     }
 
-    // Optimistically decrement UI
-    if (credits.freeLines > 0) {
-      setCredits((p) => ({ ...p, freeLines: p.freeLines - 1 }))
-    } else {
-      setCredits((p) => ({ ...p, paidLines: p.paidLines - 1 }))
-    }
+    // REMOVED: Optimistic UI decrement is gone.
+    // The UI will now only update after a successful save.
 
     currentStrokeRef.current = []
     broadcastBufferRef.current = []
