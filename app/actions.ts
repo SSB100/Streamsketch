@@ -516,3 +516,40 @@ export async function initiateNukeAction(
   revalidatePath("/dashboard")
   return { success: true }
 }
+
+// New leaderboard functions
+export async function getLeaderboard() {
+  const admin = createSupabaseAdminClient()
+  try {
+    const { data, error } = await admin.rpc("get_leaderboard", { p_limit: 10 })
+    if (error) {
+      console.error("Failed to fetch leaderboard:", error)
+      throw new Error(error.message)
+    }
+    return data || []
+  } catch (error: any) {
+    console.error("Leaderboard fetch failed:", error)
+    throw new Error(`Failed to fetch leaderboard: ${error.message}`)
+  }
+}
+
+export async function getUserRank(walletAddress: string) {
+  const admin = createSupabaseAdminClient()
+  try {
+    const { data, error } = await admin.rpc("get_user_rank", { p_wallet_address: walletAddress })
+    if (error) {
+      console.error("Failed to fetch user rank:", error)
+      throw new Error(error.message)
+    }
+    // The RPC returns an array with one object, so we extract the first item
+    const result = Array.isArray(data) && data.length > 0 ? data[0] : null
+    return {
+      user_rank: result?.user_rank ?? 0,
+      total_earnings: result?.total_earnings ?? 0,
+      total_users_with_earnings: result?.total_users_with_earnings ?? 0,
+    }
+  } catch (error: any) {
+    console.error("User rank fetch failed:", error)
+    throw new Error(`Failed to fetch user rank: ${error.message}`)
+  }
+}

@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation"
 import React from "react"
 import { Header } from "@/components/header"
+import { Leaderboard } from "@/components/leaderboard"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -144,6 +145,9 @@ export default function HomePage() {
             </div>
           </div>
         </section>
+
+        {/* Leaderboard Section */}
+        <Leaderboard />
       </main>
       <footer className="border-t border-border/40 py-6">
         <div className="container text-center text-sm text-muted-foreground">

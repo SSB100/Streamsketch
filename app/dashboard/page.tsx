@@ -6,6 +6,7 @@ import { useEffect, useState } from "react"
 import { useWallet } from "@solana/wallet-adapter-react"
 import { Header } from "@/components/header"
 import { StatsCards } from "@/components/dashboard/stats-cards"
+import { RankDisplay } from "@/components/dashboard/rank-display"
 import { PurchaseCredits } from "@/components/dashboard/purchase-credits"
 import { SessionManager } from "@/components/dashboard/session-manager"
 import { TransactionHistory } from "@/components/dashboard/transaction-history"
@@ -47,7 +48,9 @@ type Session = {
 function DashboardSkeleton() {
   return (
     <div className="flex flex-col gap-8">
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+      <Skeleton className="h-[400px] w-full" />
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-6">
+        <Skeleton className="h-[125px] w-full" />
         <Skeleton className="h-[125px] w-full" />
         <Skeleton className="h-[125px] w-full" />
         <Skeleton className="h-[125px] w-full" />
@@ -167,6 +170,7 @@ function DashboardContent() {
           <>
             <h1 className="mb-6 text-3xl font-bold tracking-tighter text-white">Dashboard</h1>
             <div className="flex flex-col gap-8">
+              <RankDisplay totalEarnings={userData.unclaimedSol + userData.totalClaimedSol} />
               <StatsCards
                 lineCredits={userData.lineCredits}
                 unclaimedSol={userData.unclaimedSol}
@@ -181,7 +185,7 @@ function DashboardContent() {
                 linesGifted={userData.linesGifted}
                 nukesGifted={userData.nukesGifted}
                 userSessions={userData.sessions}
-                onGiftSuccess={refreshAllData} // Add this callback
+                onGiftSuccess={refreshAllData}
               />
               <PurchaseCredits onPurchaseSuccess={refreshAllData} />
               <SessionManager initialSessions={sessions} />

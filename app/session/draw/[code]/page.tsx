@@ -56,6 +56,7 @@ function DrawPageContent({ params }: { params: { code: string } }) {
   const lastNukeTimestampRef = useRef<number>(0)
   const drawStartTimeRef = useRef<number>(0)
   const isInitialSubscription = useRef(true)
+  const lineDrawTimerRef = useRef<NodeJS.Timeout | null>(null)
 
   // Track pending optimistic drawings
   const pendingDrawingsRef = useRef<
@@ -226,6 +227,21 @@ function DrawPageContent({ params }: { params: { code: string } }) {
       return false
     }
     drawStartTimeRef.current = Date.now()
+
+    // Clear any existing timer to prevent issues if a new draw starts quickly
+    if (lineDrawTimerRef.current) {
+      clearTimeout(lineDrawTimerRef.current)
+    }
+
+    // Set a timer to stop drawing after 5 seconds
+    lineDrawTimerRef.current = setTimeout(() => {
+      if (canvasRef.current) {
+        canvasRef.current.forceStopDrawing()
+        // Clear the timer ref since we've just used it
+        lineDrawTimerRef.current = null
+      }
+    }, 5000) // 5 seconds
+
     return true
   }
 
@@ -267,11 +283,22 @@ function DrawPageContent({ params }: { params: { code: string } }) {
   )
 
   const handleDrawEnd = async (line: Omit<Drawing["drawing_data"], "drawer_wallet_address">) => {
+    // Clear the timer when drawing ends (either naturally or forced)
+    if (lineDrawTimerRef.current) {
+      clearTimeout(lineDrawTimerRef.current)
+      lineDrawTimerRef.current = null
+    }
+
     if (!publicKey || !session) return
 
     // Prevent sending a drawing that was started before the last nuke
     if (drawStartTimeRef.current < lastNukeTimestampRef.current) {
       toast.info("The board was cleared while you were drawing. Your line was not saved.")
+      return
+    }
+
+    // Only process if we have at least 2 points (a valid line)
+    if (!line.points || line.points.length < 2) {
       return
     }
 

@@ -159,11 +159,18 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(
       },
 
       forceStopDrawing: () => {
-        if (isDrawingRef.current) {
-          isDrawingRef.current = false
-          currentPointsRef.current = []
-          redrawAll() // Clear any partial drawing
+        if (isDrawingRef.current && currentPointsRef.current.length > 1) {
+          // Trigger the normal draw end process to save the line
+          onDrawEnd({
+            points: currentPointsRef.current,
+            color,
+            lineWidth,
+          })
         }
+        // Reset the drawing state
+        isDrawingRef.current = false
+        currentPointsRef.current = []
+        redrawAll()
       },
 
       addOptimisticDrawing: (drawing: Drawing) => {
