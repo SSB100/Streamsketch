@@ -1,7 +1,7 @@
 "use client"
 
 import { useRouter } from "next/navigation"
-import React from "react"
+import React, { useEffect } from "react"
 import { Header } from "@/components/header"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -15,6 +15,18 @@ export default function HomePage() {
   const router = useRouter()
   const { connected } = useWallet()
   const [sessionCode, setSessionCode] = React.useState("")
+
+  // Handle scrolling to leaderboard when URL has hash
+  useEffect(() => {
+    if (window.location.hash === "#leaderboard") {
+      setTimeout(() => {
+        const leaderboardElement = document.getElementById("leaderboard")
+        if (leaderboardElement) {
+          leaderboardElement.scrollIntoView({ behavior: "smooth" })
+        }
+      }, 100) // Small delay to ensure page is loaded
+    }
+  }, [])
 
   const handleJoinSession = (e: React.FormEvent) => {
     e.preventDefault()
@@ -146,7 +158,7 @@ export default function HomePage() {
           </div>
         </section>
 
-        <section className="py-12 md:py-16">
+        <section id="leaderboard" className="py-12 md:py-16">
           <div className="container">
             <Leaderboard />
           </div>

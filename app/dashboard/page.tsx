@@ -10,6 +10,7 @@ import { PurchaseCredits } from "@/components/dashboard/purchase-credits"
 import { SessionManager } from "@/components/dashboard/session-manager"
 import { TransactionHistory } from "@/components/dashboard/transaction-history"
 import { ProfileManager } from "@/components/dashboard/profile-manager"
+import { RankDisplay } from "@/components/dashboard/rank-display"
 import { getUserData, getUserSessions, getUserFreeCreditSessions } from "@/app/actions"
 import { Skeleton } from "@/components/ui/skeleton"
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui"
@@ -47,6 +48,7 @@ type Session = {
 function DashboardSkeleton() {
   return (
     <div className="flex flex-col gap-8">
+      <Skeleton className="h-[100px] w-full" />
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
         <Skeleton className="h-[125px] w-full" />
         <Skeleton className="h-[125px] w-full" />
@@ -167,6 +169,7 @@ function DashboardContent() {
           <>
             <h1 className="mb-6 text-3xl font-bold tracking-tighter text-white">Dashboard</h1>
             <div className="flex flex-col gap-8">
+              <RankDisplay />
               <StatsCards
                 lineCredits={userData.lineCredits}
                 unclaimedSol={userData.unclaimedSol}

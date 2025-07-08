@@ -640,3 +640,32 @@ export async function getRevenueLeaderboard(limit = 10) {
     return []
   }
 }
+
+export async function getUserRank(walletAddress: string) {
+  const admin = createSupabaseAdminClient()
+
+  try {
+    const { data, error } = await admin.rpc("get_user_rank", {
+      p_wallet_address: walletAddress,
+    })
+
+    if (error) {
+      console.error("[StreamSketch] Error fetching user rank:", error.message)
+      return null
+    }
+
+    // The RPC function returns an array with a single object or empty array
+    const result = Array.isArray(data) && data.length > 0 ? data[0] : null
+
+    return result
+      ? {
+          rank: Number(result.rank),
+          totalRevenue: Number(result.total_revenue),
+          username: result.username,
+        }
+      : null
+  } catch (error: any) {
+    console.error("[StreamSketch] Error fetching user rank:", error?.message ?? error)
+    return null
+  }
+}
