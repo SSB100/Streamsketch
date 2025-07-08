@@ -702,3 +702,37 @@ export async function addDrawingSegments(sessionId: string, segments: Omit<Drawi
 
   return { success: true }
 }
+
+export async function spendCreditsAndDrawStrokesBatchAction(
+  drawerWalletAddress: string,
+  sessionId: string,
+  strokes: { drawing_data: Omit<Drawing, "id" | "drawer_wallet_address"> }[][],
+) {
+  const supabase = createSupabaseAdminClient()
+
+  const strokeCount = strokes.length
+  if (strokeCount === 0) {
+    return { success: true } // Nothing to do
+  }
+
+  // Flatten the array of strokes into a single array of segment data
+  const segments = strokes.flat().map((s) => s.drawing_data)
+
+  const { error } = await supabase.rpc("spend_credits_and_draw_strokes_batch", {
+    p_drawer_wallet_address: drawerWalletAddress,
+    p_session_id: sessionId,
+    p_stroke_count: strokeCount,
+    p_segments: segments,
+  })
+
+  if (error) {
+    console.error("spendCreditsAndDrawStrokesBatchAction failed:", error.message)
+    // Provide a more user-friendly error message
+    if (error.message.includes("Insufficient paid line credits")) {
+      return { success: false, error: "You ran out of credits while drawing." }
+    }
+    return { success: false, error: "A server error occurred while saving your drawing." }
+  }
+
+  return { success: true }
+}

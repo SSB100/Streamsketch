@@ -16,7 +16,7 @@ import {
   getUserData,
   processNukePurchase,
   getFreeCreditsForSession,
-  spendCreditAndDrawStrokeAction, // Import the new action
+  spendCreditsAndDrawStrokesBatchAction, // Import the new BATCH action
 } from "@/app/actions"
 import { Rocket, Edit, Bomb } from "lucide-react"
 import { toast } from "sonner"
@@ -36,8 +36,9 @@ import { ErrorBoundary } from "@/components/error-boundary"
 
 type DrawingSegment = Omit<Drawing, "id">
 
-const BROADCAST_INTERVAL_MS = 200 // Increased interval to reduce broadcast chattiness
+const BROADCAST_INTERVAL_MS = 200
 const DRAWING_TIME_LIMIT_MS = 5000
+const BATCH_SAVE_INTERVAL_MS = 1500 // Send data to server every 1.5 seconds
 
 function DrawPageContent({ params }: { params: { code: string } }) {
   const { publicKey, sendTransaction, wallet } = useWallet()
@@ -63,8 +64,10 @@ function DrawPageContent({ params }: { params: { code: string } }) {
   const canvasRef = useRef<CanvasHandle>(null)
   const broadcastBufferRef = useRef<DrawingSegment[]>([])
   const currentStrokeRef = useRef<DrawingSegment[]>([])
+  const strokesToSaveBufferRef = useRef<DrawingSegment[][]>([])
   const broadcastIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const drawingTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const batchSaveIntervalRef = useRef<NodeJS.Timeout | null>(null)
 
   const handleIncomingDrawBatch = useCallback(
     ({ segments }: { segments: Drawing[] }) => {
@@ -117,6 +120,25 @@ function DrawPageContent({ params }: { params: { code: string } }) {
     }
   }, [params.code])
 
+  const sendStrokesToServer = useCallback(async () => {
+    if (strokesToSaveBufferRef.current.length === 0 || !publicKey || !session) {
+      return
+    }
+
+    const strokesBatch = [...strokesToSaveBufferRef.current]
+    strokesToSaveBufferRef.current = []
+
+    const res = await spendCreditsAndDrawStrokesBatchAction(publicKey.toBase58(), session.id, strokesBatch)
+
+    if (res.success) {
+      await refreshUserData()
+    } else {
+      toast.error("Your drawing failed to save.", { description: res.error || "Please try again." })
+      await resetCanvasToTruth()
+      await refreshUserData()
+    }
+  }, [publicKey, session, refreshUserData, resetCanvasToTruth])
+
   useEffect(() => {
     async function bootstrap() {
       setIsLoading(true)
@@ -147,10 +169,18 @@ function DrawPageContent({ params }: { params: { code: string } }) {
       }
     }, 10000)
 
-    return () => {
-      clearInterval(keepAliveInterval)
-    }
+    return () => clearInterval(keepAliveInterval)
   }, [params.code, publicKey, refreshUserData, session])
+
+  useEffect(() => {
+    batchSaveIntervalRef.current = setInterval(sendStrokesToServer, BATCH_SAVE_INTERVAL_MS)
+    return () => {
+      if (batchSaveIntervalRef.current) {
+        clearInterval(batchSaveIntervalRef.current)
+      }
+      sendStrokesToServer()
+    }
+  }, [sendStrokesToServer])
 
   const broadcastDrawingSegments = useCallback(() => {
     if (broadcastBufferRef.current.length > 0 && channel) {
@@ -160,40 +190,27 @@ function DrawPageContent({ params }: { params: { code: string } }) {
     }
   }, [channel])
 
-  const handleDrawEnd = useCallback(async () => {
+  const handleDrawEnd = useCallback(() => {
     if (broadcastIntervalRef.current) clearInterval(broadcastIntervalRef.current)
     if (drawingTimeoutRef.current) clearTimeout(drawingTimeoutRef.current)
     broadcastDrawingSegments()
 
-    if (!publicKey || !session || currentStrokeRef.current.length === 0) {
-      currentStrokeRef.current = []
-      return
+    if (currentStrokeRef.current.length > 0) {
+      strokesToSaveBufferRef.current.push([...currentStrokeRef.current])
     }
-
-    const strokeToSave = [...currentStrokeRef.current]
     currentStrokeRef.current = []
-
-    const res = await spendCreditAndDrawStrokeAction(publicKey.toBase58(), session.id, strokeToSave)
-
-    if (res.success) {
-      // On success, refresh the user data to get the new credit count
-      await refreshUserData()
-    } else {
-      toast.error("Your drawing failed to save.", { description: res.error || "Please try again." })
-      await resetCanvasToTruth()
-      await refreshUserData()
-    }
-  }, [broadcastDrawingSegments, publicKey, session, resetCanvasToTruth, refreshUserData])
+  }, [broadcastDrawingSegments])
 
   const handleDrawStart = () => {
-    if (credits.paidLines < 1 && credits.freeLines < 1) {
-      toast.error("You are out of line credits! Please purchase more.")
+    const pendingStrokes = strokesToSaveBufferRef.current.length
+    const availableCredits = credits.paidLines + credits.freeLines
+
+    if (availableCredits - pendingStrokes < 1) {
+      toast.error("You are out of line credits! Please purchase more or wait for drawings to save.")
       canvasRef.current?.forceStopDrawing()
+      sendStrokesToServer()
       return
     }
-
-    // REMOVED: Optimistic UI decrement is gone.
-    // The UI will now only update after a successful save.
 
     currentStrokeRef.current = []
     broadcastBufferRef.current = []
