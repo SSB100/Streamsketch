@@ -4,26 +4,10 @@ import Link from "next/link"
 import Image from "next/image"
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui"
 import { useWallet } from "@solana/wallet-adapter-react"
-import { useRouter, usePathname } from "next/navigation"
 import { Button } from "./ui/button"
 
 export function Header() {
   const { connected } = useWallet()
-  const router = useRouter()
-  const pathname = usePathname()
-
-  const handleLeaderboardClick = () => {
-    if (pathname === "/") {
-      // If on home page, scroll to leaderboard
-      const leaderboardElement = document.getElementById("leaderboard")
-      if (leaderboardElement) {
-        leaderboardElement.scrollIntoView({ behavior: "smooth" })
-      }
-    } else {
-      // If on another page, navigate to home and scroll to leaderboard
-      router.push("/#leaderboard")
-    }
-  }
 
   return (
     <header className="sticky top-0 z-40 w-full border-b border-border/40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -33,9 +17,6 @@ export function Header() {
           <span className="text-xl font-bold tracking-tighter text-white">StreamSketch</span>
         </Link>
         <nav className="flex items-center gap-4">
-          <Button variant="link" className="text-white hover:text-primary" onClick={handleLeaderboardClick}>
-            Leaderboard
-          </Button>
           {connected && (
             <Link href="/dashboard">
               <Button variant="link" className="text-white hover:text-primary">

@@ -1,18 +1,12 @@
-export interface Point {
-  x: number
-  y: number
-}
+export type Point = { x: number; y: number }
 
-// NEW: Represents a full line drawn by a user
-export interface Stroke {
-  color: string
-  lineWidth: number
-  segments: { from: Point; to: Point }[]
-}
-
-// UPDATED: The drawing_data is now a Stroke object
-export interface Drawing {
-  id: number
+export type Drawing = {
+  id?: number
+  drawing_data: {
+    from: Point
+    to: Point
+    color: string
+    lineWidth: number
+  }
   drawer_wallet_address: string
-  drawing_data: Stroke
 }

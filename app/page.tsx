@@ -1,32 +1,19 @@
 "use client"
 
 import { useRouter } from "next/navigation"
-import React, { useEffect } from "react"
+import React from "react"
 import { Header } from "@/components/header"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { ArrowRight, Users, Zap, Palette, TrendingUp } from "lucide-react"
 import { useWallet } from "@solana/wallet-adapter-react"
-import { Leaderboard } from "@/components/leaderboard"
 import Link from "next/link"
 
 export default function HomePage() {
   const router = useRouter()
   const { connected } = useWallet()
   const [sessionCode, setSessionCode] = React.useState("")
-
-  // Handle scrolling to leaderboard when URL has hash
-  useEffect(() => {
-    if (window.location.hash === "#leaderboard") {
-      setTimeout(() => {
-        const leaderboardElement = document.getElementById("leaderboard")
-        if (leaderboardElement) {
-          leaderboardElement.scrollIntoView({ behavior: "smooth" })
-        }
-      }, 100) // Small delay to ensure page is loaded
-    }
-  }, [])
 
   const handleJoinSession = (e: React.FormEvent) => {
     e.preventDefault()
@@ -155,12 +142,6 @@ export default function HomePage() {
                 </CardContent>
               </Card>
             </div>
-          </div>
-        </section>
-
-        <section id="leaderboard" className="py-12 md:py-16">
-          <div className="container">
-            <Leaderboard />
           </div>
         </section>
       </main>

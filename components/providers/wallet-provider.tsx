@@ -11,7 +11,7 @@ import { clusterApiUrl } from "@solana/web3.js"
 import "@solana/wallet-adapter-react-ui/styles.css"
 
 export function AppWalletProvider({ children }: { children: React.ReactNode }) {
-  const network = WalletAdapterNetwork.Mainnet
+  const network = WalletAdapterNetwork.Devnet
   const hasRpcWarningBeenLogged = useRef(false)
 
   const endpoint = useMemo(() => {

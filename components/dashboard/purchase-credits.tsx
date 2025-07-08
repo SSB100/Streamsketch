@@ -44,15 +44,7 @@ export function PurchaseCredits({ onPurchaseSuccess }: PurchaseCreditsProps) {
       const signature = await sendTransaction(transaction, connection)
       toast.info("Transaction sent! Awaiting confirmation...")
 
-      const confirmation = await connection.confirmTransaction(
-        { signature, blockhash, lastValidBlockHeight },
-        "confirmed",
-      )
-
-      if (confirmation.value.err) {
-        throw new Error(`On-chain transaction failed: ${JSON.stringify(confirmation.value.err)}`)
-      }
-
+      await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, "confirmed")
       toast.success("Transaction confirmed! Updating credits...")
 
       const result = await processCreditPurchase(publicKey.toBase58(), signature, pkg.id)

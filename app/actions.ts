@@ -1,7 +1,7 @@
 "use server"
 import { createSupabaseAdminClient } from "@/lib/supabase/admin"
 import { revalidatePath } from "next/cache"
-import type { Drawing, Stroke } from "@/lib/types"
+import type { Drawing } from "@/lib/types"
 import { STREAMER_REVENUE_SHARE, APP_WALLET_ADDRESS } from "@/lib/constants"
 import {
   Connection,
@@ -18,23 +18,23 @@ import { PURCHASE_PACKAGES } from "@/lib/packages"
 
 async function ensureUser(walletAddress: string) {
   const admin = createSupabaseAdminClient()
-  const { data: user } = await admin.from("users").select("wallet_address").eq("wallet_address", walletAddress).single()
 
-  if (!user) {
-    const { error: insertError } = await admin
-      .from("users")
-      .insert({ wallet_address: walletAddress, line_credits_standard: 0, line_credits_discounted: 0 })
-    if (insertError) {
-      console.error("Error creating user:", insertError.message)
-      throw new Error(insertError.message)
-    }
-    const { error: revenueInsertError } = await admin
-      .from("revenue")
-      .insert({ streamer_wallet_address: walletAddress, unclaimed_sol: 0, total_claimed_sol: 0 })
-    if (revenueInsertError) {
-      console.error("Error creating revenue entry:", revenueInsertError.message)
-      throw new Error(revenueInsertError.message)
-    }
+  // 1️⃣ Try to insert the user; ignore “duplicate key” errors.
+  const { error: userError } = await admin.from("users").insert({ wallet_address: walletAddress }).single()
+
+  if (userError && userError.code !== "23505") {
+    console.error("Error in ensureUser (users):", userError.message)
+    throw new Error(`Failed to ensure user exists: ${userError.message}`)
+  }
+
+  // 2️⃣ Make sure a matching revenue row exists (older users pre-trigger may miss it).
+  const { error: revError } = await admin
+    .from("revenue")
+    .insert({ streamer_wallet_address: walletAddress }, { ignoreDuplicates: true })
+
+  if (revError && revError.code !== "23505") {
+    console.error("Error in ensureUser (revenue):", revError.message)
+    throw new Error(`Failed to ensure revenue row: ${revError.message}`)
   }
 }
 
@@ -338,27 +338,17 @@ export async function getSessionData(shortCode: string) {
   return { session, drawings: drawings as Drawing[] }
 }
 
-export async function spendCreditAndDrawStrokeAction(
-  drawerWalletAddress: string,
-  sessionId: string,
-  strokeData: Stroke,
-) {
+export async function spendDrawingCredit(drawerWalletAddress: string, sessionId: string, drawing: Omit<Drawing, "id">) {
   const supabase = createSupabaseAdminClient()
 
-  const { error } = await supabase.rpc("spend_credit_and_draw_stroke", {
+  const { error } = await supabase.rpc("spend_credit_and_draw", {
     p_drawer_wallet_address: drawerWalletAddress,
+    p_drawing_data: drawing.drawing_data,
     p_session_id: sessionId,
-    p_stroke_data: strokeData,
   })
 
-  if (error) {
-    console.error("spendCreditAndDrawStrokeAction failed:", error.message)
-    if (error.message.includes("Insufficient paid line credits")) {
-      return { success: false, error: "You ran out of credits while drawing." }
-    }
-    return { success: false, error: "A server error occurred while saving your drawing." }
-  }
-
+  if (error) return { success: false, error: error.message }
+  revalidatePath("/dashboard")
   return { success: true }
 }
 
@@ -390,12 +380,6 @@ export async function claimRevenueAction(walletAddress: string) {
   try {
     const connection = new Connection(rpcHost, "confirmed")
     const appKeypair = Keypair.fromSecretKey(bs58.decode(secretKeyStr))
-
-    if (appKeypair.publicKey.toBase58() !== APP_WALLET_ADDRESS.toBase58()) {
-      console.error("CRITICAL: APP_WALLET_SECRET_KEY does not match NEXT_PUBLIC_APP_WALLET_ADDRESS.")
-      return { success: false, error: "Payout service is misconfigured. Please contact support." }
-    }
-
     const streamerPublicKey = new PublicKey(walletAddress)
 
     const transaction = new Transaction().add(
@@ -499,6 +483,20 @@ export async function deleteSession(sessionId: string, walletAddress: string) {
   return { success: true }
 }
 
+export async function addDrawingSegments(
+  sessionId: string,
+  segments: { drawer_wallet_address: string; drawing_data: Omit<Drawing, "drawer_wallet_address" | "id"> }[],
+) {
+  const supabase = createSupabaseAdminClient()
+  const { error } = await supabase.rpc("add_drawing_segments", {
+    p_session_id: sessionId,
+    p_segments: segments,
+  })
+
+  if (error) return { success: false, error: error.message }
+  return { success: true }
+}
+
 export async function giftCreditsToSessionAction(
   ownerWallet: string,
   sessionId: string,
@@ -526,7 +524,9 @@ export async function giftCreditsToSessionAction(
     return { success: false, error: error.message }
   }
 
+  // Force refresh the dashboard data after gifting
   revalidatePath("/dashboard")
+
   return { success: true, message: data }
 }
 
@@ -543,7 +543,11 @@ export async function getFreeCreditsForSession(userWallet: string, sessionId: st
       console.warn("[StreamSketch] Error fetching session free credits:", error.message)
       return { freeLines: 0, freeNukes: 0 }
     }
+
+    // The RPC function returns an array with a single object, e.g., [{ free_lines: 5, free_nukes: 1 }]
+    // We need to access the first element of the array.
     const result = Array.isArray(data) && data.length > 0 ? data[0] : null
+
     return {
       freeLines: result?.free_lines ?? 0,
       freeNukes: result?.free_nukes ?? 0,
@@ -578,6 +582,7 @@ export async function triggerFreeNukeAction(nukerWalletAddress: string, sessionI
   const supabase = createSupabaseAdminClient()
 
   try {
+    // First, decrement the session-specific credit. This is fast and what the user waits for.
     const { error: decrementError } = await supabase.rpc("decrement_session_free_nuke_credit", {
       p_nuker_wallet_address: nukerWalletAddress,
       p_session_id: sessionId,
@@ -587,6 +592,7 @@ export async function triggerFreeNukeAction(nukerWalletAddress: string, sessionI
       return { success: false, error: `Failed to use free nuke: ${decrementError.message}` }
     }
 
+    // Then, trigger the cleanup in the background.
     supabase
       .rpc("perform_free_nuke_cleanup", {
         p_nuker_wallet_address: nukerWalletAddress,
@@ -606,88 +612,4 @@ export async function triggerFreeNukeAction(nukerWalletAddress: string, sessionI
     console.error("[StreamSketch] Free nuke action failed:", error?.message ?? error)
     return { success: false, error: `Failed to use free nuke: ${error?.message ?? "Unknown error"}` }
   }
-}
-
-export async function getRevenueLeaderboard(limit = 10) {
-  const admin = createSupabaseAdminClient()
-
-  try {
-    const { data, error } = await admin.rpc("get_revenue_leaderboard", {
-      p_limit: limit,
-    })
-
-    if (error) {
-      console.error("[StreamSketch] Error fetching leaderboard:", error.message)
-      return []
-    }
-
-    return data || []
-  } catch (error: any) {
-    console.error("[StreamSketch] Error fetching leaderboard:", error?.message ?? error)
-    return []
-  }
-}
-
-export async function getUserRank(walletAddress: string) {
-  const admin = createSupabaseAdminClient()
-
-  try {
-    const { data, error } = await admin.rpc("get_user_rank", {
-      p_wallet_address: walletAddress,
-    })
-
-    if (error) {
-      console.error("[StreamSketch] Error fetching user rank:", error.message)
-      return null
-    }
-    const result = Array.isArray(data) && data.length > 0 ? data[0] : null
-    return result
-      ? {
-          rank: Number(result.rank),
-          totalRevenue: Number(result.total_revenue),
-          username: result.username,
-        }
-      : null
-  } catch (error: any) {
-    console.error("[StreamSketch] Error fetching user rank:", error?.message ?? error)
-    return null
-  }
-}
-
-/**
- * Legacy helper kept for backward-compatibility.
- * This function is now compatible with the new atomic stroke model.
- */
-export async function spendDrawingCredit(drawerWalletAddress: string, sessionId: string, drawing: Omit<Drawing, "id">) {
-  // The `drawing` parameter contains the `drawing_data` which is the `Stroke` object we need.
-  const strokeData: Stroke = drawing.drawing_data
-
-  // Now call the new action with the correct argument type.
-  const result = await spendCreditAndDrawStrokeAction(drawerWalletAddress, sessionId, strokeData)
-
-  return result
-}
-
-/**
- * Legacy helper to append drawing segments without spending credits.
- * This is compatible with the new `Stroke` data model.
- */
-export async function addDrawingSegments(sessionId: string, drawings: Omit<Drawing, "id" | "session_id">[]) {
-  const supabase = createSupabaseAdminClient()
-
-  // Shape rows correctly for bulk insert
-  const rows = drawings.map((d) => ({
-    session_id: sessionId,
-    drawer_wallet_address: d.drawer_wallet_address,
-    drawing_data: d.drawing_data, // d.drawing_data is a Stroke object
-  }))
-
-  const { error } = await supabase.from("drawings").insert(rows)
-
-  if (error) {
-    console.error("addDrawingSegments failed:", error.message)
-    return { success: false, error: error.message }
-  }
-
-  return { success: true }
 }

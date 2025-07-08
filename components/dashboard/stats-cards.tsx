@@ -40,7 +40,7 @@ export function StatsCards({
           action: result.signature
             ? {
                 label: "View on Solscan",
-                onClick: () => window.open(`https://solscan.io/tx/${result.signature}`, "_blank"),
+                onClick: () => window.open(`https://solscan.io/tx/${result.signature}?cluster=devnet`, "_blank"),
               }
             : undefined,
         })
