@@ -13,13 +13,12 @@ import { NukeAnimationOverlay } from "@/components/whiteboard/nuke-animation-ove
 import { useRealtimeChannel } from "@/hooks/use-realtime-channel"
 import {
   getSessionData,
-  spendDrawingCredit,
   getUserData,
   processNukePurchase,
-  addDrawingSegments,
   getFreeCreditsForSession,
+  recordDrawingAction,
 } from "@/app/actions"
-import { Rocket, Edit, Bomb } from "lucide-react"
+import { Rocket, Edit, Bomb, RefreshCw } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import {
@@ -35,18 +34,13 @@ import { APP_WALLET_ADDRESS } from "@/lib/constants"
 import { useFreeNukeAction } from "@/hooks/use-free-nuke-action"
 import { ErrorBoundary } from "@/components/error-boundary"
 
-type DrawingSegment = Omit<Drawing, "id">
-
-const BROADCAST_INTERVAL_MS = 50
-const DRAWING_TIME_LIMIT_MS = 5000
-
 function DrawPageContent({ params }: { params: { code: string } }) {
   const { publicKey, sendTransaction, wallet } = useWallet()
   const { connection } = useConnection()
   const freeNukeAction = useFreeNukeAction()
 
   const [session, setSession] = useState<{ id: string; owner_wallet_address: string } | null>(null)
-  const [initialDrawings, setInitialDrawings] = useState<Drawing[]>([])
+  const [drawings, setDrawings] = useState<Drawing[]>([])
   const [credits, setCredits] = useState({
     paidLines: 0,
     freeLines: 0,
@@ -60,43 +54,35 @@ function DrawPageContent({ params }: { params: { code: string } }) {
   const [brushSize, setBrushSize] = useState(5)
 
   const canvasRef = useRef<CanvasHandle>(null)
-  const broadcastBufferRef = useRef<DrawingSegment[]>([])
-  const currentStrokeRef = useRef<DrawingSegment[]>([])
-  const broadcastIntervalRef = useRef<NodeJS.Timeout | null>(null)
-  const drawingTimeoutRef = useRef<NodeJS.Timeout | null>(null)
-  const isFirstSegmentOfStroke = useRef(true)
 
-  const handleIncomingDrawBatch = useCallback(
-    ({ segments }: { segments: Drawing[] }) => {
-      if (segments[0]?.drawer_wallet_address !== publicKey?.toBase58()) {
-        segments.forEach((drawing) => canvasRef.current?.drawFromBroadcast(drawing))
-      }
-    },
-    [publicKey],
-  )
-
+  // --- Realtime Channel (Nukes Only on Draw Page) ---
   const handleIncomingNuke = useCallback(
     ({ username, animationId }: { username: string | null; animationId: string }) => {
+      setDrawings([]) // Clear local drawings state
       canvasRef.current?.clearCanvas()
       setNukeEvent({ username, animationId })
     },
     [],
   )
 
+  // The draw page doesn't need to listen for other drawings, only nukes.
   const channelOptions = useMemo(
-    () => ({ onDrawBatchBroadcast: handleIncomingDrawBatch, onNukeBroadcast: handleIncomingNuke }),
-    [handleIncomingDrawBatch, handleIncomingNuke],
+    () => ({
+      onNukeBroadcast: handleIncomingNuke,
+      onDrawBroadcast: () => {}, // No-op on the draw page
+    }),
+    [handleIncomingNuke],
   )
-  const channel = useRealtimeChannel(session?.id ?? null, channelOptions)
+  useRealtimeChannel(session?.id ?? null, channelOptions)
 
+  // --- Data Fetching ---
   const refreshUserData = useCallback(async () => {
     if (!publicKey || !session) return
     try {
       const [paidData, freeData] = await Promise.all([
         getUserData(publicKey.toBase58()),
-        getFreeCreditsForSession(publicKey.toBase58(), session.id), // Changed from session.owner_wallet_address to session.id
+        getFreeCreditsForSession(publicKey.toBase58(), session.id),
       ])
-      console.log("[DrawPage] Refreshed free credits for session:", session.id, freeData)
       setCredits({
         paidLines: paidData.lineCredits,
         username: paidData.username,
@@ -109,8 +95,9 @@ function DrawPageContent({ params }: { params: { code: string } }) {
     }
   }, [publicKey, session])
 
+  // --- Initial Page Load ---
   useEffect(() => {
-    async function bootstrap() {
+    const bootstrap = async () => {
       setIsLoading(true)
       try {
         const { session: s, drawings: d } = await getSessionData(params.code)
@@ -120,132 +107,74 @@ function DrawPageContent({ params }: { params: { code: string } }) {
           return
         }
         setSession(s as { id: string; owner_wallet_address: string })
-        setInitialDrawings(d)
-        if (publicKey) {
-          const [paidData, freeData] = await Promise.all([
-            getUserData(publicKey.toBase58()),
-            getFreeCreditsForSession(publicKey.toBase58(), s.id), // Changed from s.owner_wallet_address to s.id
-          ])
-          console.log("[DrawPage] Free credits for session:", s.id, freeData)
-          setCredits({
-            paidLines: paidData.lineCredits,
-            username: paidData.username,
-            freeLines: freeData.freeLines,
-            freeNukes: freeData.freeNukes,
-          })
-        }
+        setDrawings(d)
       } catch (err) {
         console.error("Bootstrap failed:", err)
-        toast.error("Failed to load session data")
+        toast.error("Failed to load session data.")
       } finally {
         setIsLoading(false)
       }
     }
     bootstrap()
-  }, [params.code, publicKey])
+  }, [params.code])
 
-  const broadcastDrawingSegments = useCallback(() => {
-    if (broadcastBufferRef.current.length > 0 && channel) {
-      const segmentsToSend = [...broadcastBufferRef.current]
-      broadcastBufferRef.current = []
-      channel.send({ type: "broadcast", event: "draw_batch", payload: { segments: segmentsToSend } })
+  // Refresh user-specific data when the session or user changes
+  useEffect(() => {
+    if (session && publicKey) {
+      refreshUserData()
     }
-  }, [channel])
+  }, [session, publicKey, refreshUserData])
 
-  const handleDrawEnd = useCallback(() => {
-    if (broadcastIntervalRef.current) clearInterval(broadcastIntervalRef.current)
-    if (drawingTimeoutRef.current) clearTimeout(drawingTimeoutRef.current)
-    broadcastDrawingSegments()
-
-    if (publicKey && session && currentStrokeRef.current.length > 0) {
-      addDrawingSegments(session.id, currentStrokeRef.current).catch((err) => {
-        console.error("Failed to save full drawing stroke to DB:", err)
-        toast.error("Failed to save your drawing. Please try again.")
-      })
-    }
-    currentStrokeRef.current = []
-  }, [broadcastDrawingSegments, publicKey, session])
-
+  // --- Canvas Callbacks ---
   const handleDrawStart = () => {
-    if (credits.paidLines < 1 && credits.freeLines < 1) {
-      toast.error("Out of line credits!")
-      canvasRef.current?.forceStopDrawing()
-      return
+    if (!publicKey) {
+      toast.error("Please connect your wallet to draw.")
+      return false
     }
-    isFirstSegmentOfStroke.current = true
-    broadcastBufferRef.current = []
-    currentStrokeRef.current = []
-
-    if (broadcastIntervalRef.current) clearInterval(broadcastIntervalRef.current)
-    broadcastIntervalRef.current = setInterval(broadcastDrawingSegments, BROADCAST_INTERVAL_MS)
-
-    if (drawingTimeoutRef.current) clearTimeout(drawingTimeoutRef.current)
-    drawingTimeoutRef.current = setTimeout(() => {
-      toast.info("Drawing time limit reached (5 seconds).")
-      canvasRef.current?.forceStopDrawing()
-    }, DRAWING_TIME_LIMIT_MS)
+    if (credits.paidLines + credits.freeLines < 1) {
+      toast.error("You are out of line credits!")
+      return false
+    }
+    return true
   }
 
-  const handleDraw = async (drawing: Omit<Drawing, "drawer_wallet_address" | "id">) => {
+  const handleDrawEnd = async (line: Omit<Drawing["drawing_data"], "drawer_wallet_address">) => {
     if (!publicKey || !session) return
 
-    const newSegment: DrawingSegment = { ...drawing, drawer_wallet_address: publicKey.toBase58() }
-    broadcastBufferRef.current.push(newSegment)
-    currentStrokeRef.current.push(newSegment)
+    const optimisticDrawing: Drawing = {
+      id: Date.now(),
+      drawer_wallet_address: publicKey.toBase58(),
+      drawing_data: line,
+    }
+    setDrawings((prev) => [...prev, optimisticDrawing])
+    setCredits((p) => (p.freeLines > 0 ? { ...p, freeLines: p.freeLines - 1 } : { ...p, paidLines: p.paidLines - 1 }))
 
-    if (isFirstSegmentOfStroke.current) {
-      isFirstSegmentOfStroke.current = false
-      if (credits.freeLines > 0) {
-        setCredits((p) => ({ ...p, freeLines: p.freeLines - 1 }))
-      } else {
-        setCredits((p) => ({ ...p, paidLines: p.paidLines - 1 }))
-      }
+    const { success, error } = await recordDrawingAction(publicKey.toBase58(), session.id, line)
 
-      try {
-        const res = await spendDrawingCredit(publicKey.toBase58(), session.id, newSegment)
-        if (!res.success) {
-          toast.error("Failed to spend credit", { description: res.error })
-          await refreshUserData()
-          canvasRef.current?.forceStopDrawing()
-        }
-      } catch (error) {
-        console.error("Error spending drawing credit:", error)
-        toast.error("Failed to spend credit")
-        await refreshUserData()
-        canvasRef.current?.forceStopDrawing()
-      }
+    if (!success) {
+      toast.error("Failed to save drawing", { description: error })
+      setDrawings((prev) => prev.filter((d) => d.id !== optimisticDrawing.id))
+      await refreshUserData()
     }
   }
 
+  // --- Nuke Handler ---
   const handleNuke = async (animation: NukeAnimation) => {
-    if (!publicKey || !wallet || !sendTransaction || !session || !channel) {
+    if (!publicKey || !wallet || !sendTransaction || !session) {
       toast.error("Wallet not fully connected or session invalid.")
       return
     }
 
     if (animation.id === "free_nuke") {
-      try {
-        const result = await freeNukeAction(publicKey.toBase58(), session.id)
-        if (!result.success) {
-          toast.error("Failed to use free nuke.", { description: result.error })
-          return
-        }
-
-        toast.success("Nuking the board with a free credit!")
-        const usernameForBroadcast = credits.username
-        channel.send({
-          type: "broadcast",
-          event: "nuke",
-          payload: { username: usernameForBroadcast, animationId: animation.id },
-        })
-        canvasRef.current?.clearCanvas()
-        setNukeEvent({ username: usernameForBroadcast, animationId: animation.id })
-        setIsNukeDialogOpen(false)
-        setCredits((p) => ({ ...p, freeNukes: p.freeNukes - 1 }))
-      } catch (error: any) {
-        console.error("Free nuke error:", error)
-        toast.error("Failed to use free nuke.", { description: error.message })
+      const result = await freeNukeAction(publicKey.toBase58(), session.id)
+      if (!result.success) {
+        toast.error("Failed to use free nuke.", { description: result.error })
+        return
       }
+      setCredits((p) => ({ ...p, freeNukes: p.freeNukes - 1 }))
+      canvasRef.current?.clearCanvas()
+      setNukeEvent({ username: credits.username, animationId: animation.id })
+      setIsNukeDialogOpen(false)
       return
     }
 
@@ -258,26 +187,17 @@ function DrawPageContent({ params }: { params: { code: string } }) {
           lamports: animation.price * LAMPORTS_PER_SOL,
         }),
       )
-
       const signature = await sendTransaction(transaction, connection)
       toast.info("Transaction sent! Awaiting confirmation...")
-
       await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, "confirmed")
       toast.success("Payment confirmed! Nuking the board...")
 
-      const usernameForBroadcast = credits.username
-      channel.send({
-        type: "broadcast",
-        event: "nuke",
-        payload: { username: usernameForBroadcast, animationId: animation.id },
-      })
       canvasRef.current?.clearCanvas()
-      setNukeEvent({ username: usernameForBroadcast, animationId: animation.id })
+      setNukeEvent({ username: credits.username, animationId: animation.id })
       setIsNukeDialogOpen(false)
 
       processNukePurchase(publicKey.toBase58(), session.id, animation, signature).catch((err) => {
         console.error("Background nuke processing failed:", err)
-        toast.warning("Nuke successful, but there was a server issue. Please contact support.", { duration: 10000 })
       })
     } catch (error: any) {
       console.error("Nuke purchase failed", error)
@@ -285,14 +205,16 @@ function DrawPageContent({ params }: { params: { code: string } }) {
     }
   }
 
-  if (isLoading)
+  if (isLoading) {
     return <div className="flex h-screen w-full items-center justify-center bg-deep-space text-white">Loading…</div>
-  if (!session)
+  }
+  if (!session) {
     return (
       <div className="flex h-screen w-full items-center justify-center bg-deep-space text-white">
         Session not found.
       </div>
     )
+  }
 
   return (
     <main className="flex h-screen flex-col items-center justify-center bg-deep-space gap-4 p-4">
@@ -301,14 +223,19 @@ function DrawPageContent({ params }: { params: { code: string } }) {
         <Edit className="h-5 w-5 text-neon-pink" />
         <span className="font-bold">DRAWING MODE</span>
       </div>
+      <div className="absolute right-4 top-4">
+        <Button variant="outline" size="sm" onClick={() => window.location.reload()}>
+          <RefreshCw className="mr-2 h-4 w-4" />
+          Full Refresh
+        </Button>
+      </div>
       <Canvas
         ref={canvasRef}
         width={1280}
         height={720}
         isDrawable={!!publicKey}
-        initialDrawings={initialDrawings}
+        initialDrawings={drawings}
         onDrawStart={handleDrawStart}
-        onDraw={handleDraw}
         onDrawEnd={handleDrawEnd}
         color={color}
         lineWidth={brushSize}
@@ -328,13 +255,16 @@ function DrawPageContent({ params }: { params: { code: string } }) {
             variant="destructive"
             className="bg-neon-cyan text-white hover:bg-neon-cyan/90"
             onClick={() => setIsNukeDialogOpen(true)}
+            disabled={!publicKey}
           >
             <Bomb className="mr-2 h-4 w-4" />
             Nuke Board
           </Button>
           <Dialog>
             <DialogTrigger asChild>
-              <Button className="bg-neon-pink text-white hover:bg-neon-pink/90">Buy Lines</Button>
+              <Button className="bg-neon-pink text-white hover:bg-neon-pink/90" disabled={!publicKey}>
+                Buy Lines
+              </Button>
             </DialogTrigger>
             <DialogContent className="max-w-3xl border-border/40 bg-deep-space">
               <DialogHeader>

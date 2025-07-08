@@ -23,11 +23,6 @@ export default function ViewPage({ params }: { params: { code: string } }) {
   const fullscreenContainerRef = useRef<HTMLDivElement>(null)
   const lastRealtimeEventTimestamp = useRef<number>(0)
 
-  const handleIncomingDrawBatch = useCallback(({ segments }: { segments: Drawing[] }) => {
-    lastRealtimeEventTimestamp.current = Date.now()
-    setDrawings((current) => [...current, ...segments])
-  }, [])
-
   const handleIncomingNuke = useCallback(
     ({ username, animationId }: { username: string | null; animationId: string }) => {
       lastRealtimeEventTimestamp.current = Date.now()
@@ -39,10 +34,9 @@ export default function ViewPage({ params }: { params: { code: string } }) {
 
   const channelOptions = useMemo(
     () => ({
-      onDrawBatchBroadcast: handleIncomingDrawBatch,
       onNukeBroadcast: handleIncomingNuke,
     }),
-    [handleIncomingDrawBatch, handleIncomingNuke],
+    [handleIncomingNuke],
   )
 
   useRealtimeChannel(session?.id ?? null, channelOptions)

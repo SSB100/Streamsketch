@@ -3,16 +3,16 @@
 import { useEffect, useMemo, useRef } from "react"
 import { useSupabase } from "@/components/providers/supabase-provider"
 import type { RealtimeChannel } from "@supabase/supabase-js"
-import type { Drawing } from "@/lib/types"
+import type { Drawing } from "@/types/drawing" // Declare the Drawing variable
 
 type BroadcastPayload = {
-  draw_batch: { segments: Drawing[] }
   nuke: { username: string | null; animationId: string }
+  draw: { drawing: Drawing } // Add new payload type for drawings
 }
 
 type UseRealtimeChannelOptions = {
-  onDrawBatchBroadcast: (payload: BroadcastPayload["draw_batch"]) => void
   onNukeBroadcast: (payload: BroadcastPayload["nuke"]) => void
+  onDrawBroadcast: (payload: BroadcastPayload["draw"]) => void // Add new callback
 }
 
 /**
@@ -45,12 +45,13 @@ export function useRealtimeChannel(sessionId: string | null, options: UseRealtim
     channelRef.current = channel
 
     // Set up event listeners
-    channel.on("broadcast", { event: "draw_batch" }, (evt) => {
-      optionsRef.current.onDrawBatchBroadcast(evt.payload)
-    })
-
     channel.on("broadcast", { event: "nuke" }, (evt) => {
       optionsRef.current.onNukeBroadcast(evt.payload)
+    })
+
+    // Add a new listener for the 'draw' event
+    channel.on("broadcast", { event: "draw" }, (evt) => {
+      optionsRef.current.onDrawBroadcast(evt.payload)
     })
 
     // Subscribe to the channel

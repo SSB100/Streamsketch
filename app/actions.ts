@@ -338,20 +338,6 @@ export async function getSessionData(shortCode: string) {
   return { session, drawings: drawings as Drawing[] }
 }
 
-export async function spendDrawingCredit(drawerWalletAddress: string, sessionId: string, drawing: Omit<Drawing, "id">) {
-  const supabase = createSupabaseAdminClient()
-
-  const { error } = await supabase.rpc("spend_credit_and_draw", {
-    p_drawer_wallet_address: drawerWalletAddress,
-    p_drawing_data: drawing.drawing_data,
-    p_session_id: sessionId,
-  })
-
-  if (error) return { success: false, error: error.message }
-  revalidatePath("/dashboard")
-  return { success: true }
-}
-
 export async function claimRevenueAction(walletAddress: string) {
   const supabase = createSupabaseAdminClient()
   const { data: claimedAmount, error: claimError } = await supabase.rpc("claim_all_revenue", {
@@ -483,20 +469,6 @@ export async function deleteSession(sessionId: string, walletAddress: string) {
   return { success: true }
 }
 
-export async function addDrawingSegments(
-  sessionId: string,
-  segments: { drawer_wallet_address: string; drawing_data: Omit<Drawing, "drawer_wallet_address" | "id"> }[],
-) {
-  const supabase = createSupabaseAdminClient()
-  const { error } = await supabase.rpc("add_drawing_segments", {
-    p_session_id: sessionId,
-    p_segments: segments,
-  })
-
-  if (error) return { success: false, error: error.message }
-  return { success: true }
-}
-
 export async function giftCreditsToSessionAction(
   ownerWallet: string,
   sessionId: string,
@@ -612,4 +584,47 @@ export async function triggerFreeNukeAction(nukerWalletAddress: string, sessionI
     console.error("[StreamSketch] Free nuke action failed:", error?.message ?? error)
     return { success: false, error: `Failed to use free nuke: ${error?.message ?? "Unknown error"}` }
   }
+}
+
+export async function recordDrawingAction(
+  drawerWalletAddress: string,
+  sessionId: string,
+  drawingData: { points: any[]; color: string; lineWidth: number },
+) {
+  const supabase = createSupabaseAdminClient()
+
+  await ensureUser(drawerWalletAddress)
+
+  // The RPC call now returns the new drawing record
+  const { data: newDrawings, error } = await supabase.rpc("record_drawing", {
+    p_drawer_wallet_address: drawerWalletAddress,
+    p_session_id: sessionId,
+    p_drawing_data: drawingData,
+  })
+
+  if (error) {
+    console.error("Failed to record drawing:", error)
+    return { success: false, error: error.message }
+  }
+
+  // The RPC returns an array, even if it's just one row
+  const newDrawing = newDrawings && newDrawings.length > 0 ? newDrawings[0] : null
+
+  if (newDrawing) {
+    // Broadcast the new drawing to the channel.
+    // This is "fire-and-forget" to avoid slowing down the response.
+    supabase
+      .channel(`session-${sessionId}`)
+      .send({
+        type: "broadcast",
+        event: "draw",
+        payload: { drawing: newDrawing },
+      })
+      .catch(console.error) // Log any broadcast errors
+  }
+
+  // Revalidate the dashboard for credit updates. No longer need to revalidate the session path.
+  revalidatePath("/dashboard")
+
+  return { success: true }
 }

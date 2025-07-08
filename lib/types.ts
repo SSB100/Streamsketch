@@ -3,8 +3,7 @@ export type Point = { x: number; y: number }
 export type Drawing = {
   id?: number
   drawing_data: {
-    from: Point
-    to: Point
+    points: Point[]
     color: string
     lineWidth: number
   }
