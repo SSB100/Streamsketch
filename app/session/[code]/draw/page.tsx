@@ -236,10 +236,10 @@ function DrawPageContent({ params }: { params: { code: string } }) {
         channel.send({
           type: "broadcast",
           event: "nuke",
-          payload: { username: usernameForBroadcast, animationId: animation.id },
+          payload: { username: usernameForBroadcast, animationId: "default" },
         })
         canvasRef.current?.clearCanvas()
-        setNukeEvent({ username: usernameForBroadcast, animationId: animation.id })
+        setNukeEvent({ username: usernameForBroadcast, animationId: "default" })
         setIsNukeDialogOpen(false)
         setCredits((p) => ({ ...p, freeNukes: p.freeNukes - 1 }))
       } catch (error: any) {

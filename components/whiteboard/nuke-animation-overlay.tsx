@@ -16,6 +16,9 @@ export function NukeAnimationOverlay({ nukeEvent }: NukeAnimationOverlayProps) {
   // This effect triggers the animation's visibility when a new nuke event arrives.
   useEffect(() => {
     if (nukeEvent) {
+      console.log("[NukeOverlay] Nuke event received:", nukeEvent)
+      const animation = NUKE_ANIMATIONS[nukeEvent.animationId] || NUKE_ANIMATIONS.default
+      console.log("[NukeOverlay] Animation resolved:", animation)
       setIsVisible(true)
     }
   }, [nukeEvent])
@@ -45,11 +48,16 @@ export function NukeAnimationOverlay({ nukeEvent }: NukeAnimationOverlayProps) {
     <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center overflow-hidden">
       {animation.video && (
         <video
+          key={nukeEvent.animationId} // Add key to force re-render
           src={animation.video}
           autoPlay
           muted
           playsInline
-          onEnded={handleVideoEnd} // Hide overlay when video finishes
+          onEnded={handleVideoEnd}
+          onError={(e) => {
+            console.error("Video failed to load:", e)
+            setIsVisible(false)
+          }}
           className="absolute h-full w-full object-cover"
         />
       )}
