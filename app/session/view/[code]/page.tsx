@@ -22,8 +22,8 @@ export default function ViewPage({ params }: { params: { code: string } }) {
 
   // --- Realtime Channel Handlers ---
   const handleIncomingDraw = useCallback(({ drawing }: { drawing: Drawing }) => {
-    // Add the new drawing to our local state.
-    // The Canvas component will automatically redraw from this state.
+    // This function is called when a 'draw' broadcast is received.
+    // It updates the local state, and the canvas re-renders with the new line.
     setDrawings((prev) => [...prev, drawing])
   }, [])
 
@@ -63,6 +63,8 @@ export default function ViewPage({ params }: { params: { code: string } }) {
   }, [session, params.code])
 
   useEffect(() => {
+    // This useEffect only runs once to load the initial state of the canvas.
+    // There is NO setInterval or polling here.
     const fetchInitialData = async () => {
       setIsLoading(true)
       try {

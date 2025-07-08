@@ -611,7 +611,7 @@ export async function recordDrawingAction(
   const newDrawing = newDrawings && newDrawings.length > 0 ? newDrawings[0] : null
 
   if (newDrawing) {
-    // Broadcast the new drawing to the channel.
+    // THIS IS THE TRIGGER: Broadcast the new drawing to the channel.
     // This is "fire-and-forget" to avoid slowing down the response.
     supabase
       .channel(`session-${sessionId}`)
@@ -623,7 +623,7 @@ export async function recordDrawingAction(
       .catch(console.error) // Log any broadcast errors
   }
 
-  // Revalidate the dashboard for credit updates. No longer need to revalidate the session path.
+  // Revalidate the dashboard for credit updates.
   revalidatePath("/dashboard")
 
   return { success: true }
