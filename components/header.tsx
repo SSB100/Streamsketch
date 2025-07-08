@@ -5,7 +5,7 @@ import Image from "next/image"
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui"
 import { useWallet } from "@solana/wallet-adapter-react"
 import { Button } from "./ui/button"
-import { Trophy } from "lucide-react"
+import { Trophy, Lightbulb } from "lucide-react"
 
 export function Header() {
   const { connected } = useWallet()
@@ -17,6 +17,13 @@ export function Header() {
     }
   }
 
+  const scrollToHowItWorks = () => {
+    const howItWorksElement = document.getElementById("how-it-works")
+    if (howItWorksElement) {
+      howItWorksElement.scrollIntoView({ behavior: "smooth" })
+    }
+  }
+
   return (
     <header className="sticky top-0 z-40 w-full border-b border-border/40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="container flex h-16 items-center justify-between">
@@ -25,6 +32,10 @@ export function Header() {
           <span className="text-xl font-bold tracking-tighter text-white">StreamSketch</span>
         </Link>
         <nav className="flex items-center gap-4">
+          <Button variant="ghost" className="text-white hover:text-primary" onClick={scrollToHowItWorks}>
+            <Lightbulb className="mr-2 h-4 w-4" />
+            How It Works
+          </Button>
           <Button variant="ghost" className="text-white hover:text-yellow-400" onClick={scrollToLeaderboard}>
             <Trophy className="mr-2 h-4 w-4" />
             Leaderboard

@@ -10,6 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { ArrowRight, Users, Zap, Palette, TrendingUp } from "lucide-react"
 import { useWallet } from "@solana/wallet-adapter-react"
 import Link from "next/link"
+import Image from "next/image"
 
 export default function HomePage() {
   const router = useRouter()
@@ -89,11 +90,15 @@ export default function HomePage() {
                   </Button>
                 </form>
               </div>
+              <div className="mt-4 flex items-center justify-center gap-2 text-sm text-muted-foreground">
+                <Image src="/icons/chrome.png" alt="Chrome Logo" width={16} height={16} />
+                <span>Works best on Chrome Browser</span>
+              </div>
             </div>
           </div>
         </section>
 
-        <section className="py-6 md:py-8">
+        <section id="how-it-works" className="py-6 md:py-8">
           <div className="container">
             <div className="mx-auto mb-12 max-w-2xl text-center">
               <h2 className="text-3xl font-bold tracking-tighter text-white sm:text-4xl">How It Works</h2>
