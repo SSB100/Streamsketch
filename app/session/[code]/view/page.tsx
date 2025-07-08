@@ -10,7 +10,8 @@ import { Copy, Eye, Maximize, Minimize } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 
-const POLLING_INTERVAL_MS = 5000 // Check for updates every 5 seconds
+const POLLING_INTERVAL_MS = 7500 // Increased from 5000
+const POLLING_GRACE_PERIOD_MS = 2500 // Grace period for DB save
 
 export default function ViewPage({ params }: { params: { code: string } }) {
   const [session, setSession] = useState<{ id: string } | null>(null)
@@ -25,7 +26,11 @@ export default function ViewPage({ params }: { params: { code: string } }) {
 
   const handleIncomingDrawBatch = useCallback(({ segments }: { segments: Drawing[] }) => {
     lastRealtimeEventTimestamp.current = Date.now()
-    setDrawings((current) => [...current, ...segments])
+    if (canvasRef.current) {
+      segments.forEach((drawing) => {
+        canvasRef.current?.drawFromBroadcast(drawing)
+      })
+    }
   }, [])
 
   const handleIncomingNuke = useCallback(
@@ -73,7 +78,7 @@ export default function ViewPage({ params }: { params: { code: string } }) {
     const intervalId = setInterval(async () => {
       // If we received a real-time event recently, skip this poll.
       // This prevents overwriting a line that is actively being drawn.
-      if (Date.now() - lastRealtimeEventTimestamp.current < POLLING_INTERVAL_MS) {
+      if (Date.now() - lastRealtimeEventTimestamp.current < POLLING_INTERVAL_MS + POLLING_GRACE_PERIOD_MS) {
         console.log("[Polling] Skipped due to recent real-time activity.")
         return
       }
