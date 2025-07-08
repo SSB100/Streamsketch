@@ -620,3 +620,23 @@ export async function triggerFreeNukeAction(nukerWalletAddress: string, sessionI
     return { success: false, error: `Failed to use free nuke: ${error?.message ?? "Unknown error"}` }
   }
 }
+
+export async function getRevenueLeaderboard(limit = 10) {
+  const admin = createSupabaseAdminClient()
+
+  try {
+    const { data, error } = await admin.rpc("get_revenue_leaderboard", {
+      p_limit: limit,
+    })
+
+    if (error) {
+      console.error("[StreamSketch] Error fetching leaderboard:", error.message)
+      return []
+    }
+
+    return data || []
+  } catch (error: any) {
+    console.error("[StreamSketch] Error fetching leaderboard:", error?.message ?? error)
+    return []
+  }
+}

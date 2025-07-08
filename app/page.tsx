@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { ArrowRight, Users, Zap, Palette, TrendingUp } from "lucide-react"
 import { useWallet } from "@solana/wallet-adapter-react"
+import { Leaderboard } from "@/components/leaderboard"
 import Link from "next/link"
 
 export default function HomePage() {
@@ -142,6 +143,12 @@ export default function HomePage() {
                 </CardContent>
               </Card>
             </div>
+          </div>
+        </section>
+
+        <section className="py-12 md:py-16">
+          <div className="container">
+            <Leaderboard />
           </div>
         </section>
       </main>
