@@ -13,11 +13,10 @@ import { NukeAnimationOverlay } from "@/components/whiteboard/nuke-animation-ove
 import { useRealtimeChannel } from "@/hooks/use-realtime-channel"
 import {
   getSessionData,
-  spendDrawingCredit,
   getUserData,
   processNukePurchase,
-  addDrawingSegments,
   getFreeCreditsForSession,
+  spendCreditAndDrawStrokeAction, // Import the new action
 } from "@/app/actions"
 import { Rocket, Edit, Bomb } from "lucide-react"
 import { toast } from "sonner"
@@ -37,7 +36,7 @@ import { ErrorBoundary } from "@/components/error-boundary"
 
 type DrawingSegment = Omit<Drawing, "id">
 
-const BROADCAST_INTERVAL_MS = 50
+const BROADCAST_INTERVAL_MS = 200 // Increased interval to reduce broadcast chattiness
 const DRAWING_TIME_LIMIT_MS = 5000
 
 function DrawPageContent({ params }: { params: { code: string } }) {
@@ -66,7 +65,6 @@ function DrawPageContent({ params }: { params: { code: string } }) {
   const currentStrokeRef = useRef<DrawingSegment[]>([])
   const broadcastIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const drawingTimeoutRef = useRef<NodeJS.Timeout | null>(null)
-  const isFirstSegmentOfStroke = useRef(true)
 
   const handleIncomingDrawBatch = useCallback(
     ({ segments }: { segments: Drawing[] }) => {
@@ -106,15 +104,13 @@ function DrawPageContent({ params }: { params: { code: string } }) {
       })
     } catch (err) {
       console.error("Failed to refresh user data:", err)
-      toast.error("Could not refresh your credit balance.")
     }
   }, [publicKey, session])
 
-  // This function resets the canvas to the server's state.
   const resetCanvasToTruth = useCallback(async () => {
     try {
       const { drawings: serverDrawings } = await getSessionData(params.code)
-      setInitialDrawings(serverDrawings) // This triggers the canvas useEffect to redraw from a clean slate
+      setInitialDrawings(serverDrawings)
     } catch (err) {
       console.error("Failed to reset canvas to server state:", err)
       toast.error("Could not sync with the server. Please refresh.")
@@ -145,13 +141,11 @@ function DrawPageContent({ params }: { params: { code: string } }) {
     }
     bootstrap()
 
-    // Keep-alive mechanism: Refresh user data every 10 seconds
     const keepAliveInterval = setInterval(() => {
       if (publicKey && session) {
-        console.log("[Keep-Alive] Refreshing user data to maintain connection.")
         refreshUserData()
       }
-    }, 10000) // 10 seconds
+    }, 10000)
 
     return () => {
       clearInterval(keepAliveInterval)
@@ -166,23 +160,27 @@ function DrawPageContent({ params }: { params: { code: string } }) {
     }
   }, [channel])
 
-  const handleDrawEnd = useCallback(() => {
+  const handleDrawEnd = useCallback(async () => {
     if (broadcastIntervalRef.current) clearInterval(broadcastIntervalRef.current)
     if (drawingTimeoutRef.current) clearTimeout(drawingTimeoutRef.current)
     broadcastDrawingSegments()
 
-    if (publicKey && session && currentStrokeRef.current.length > 0) {
-      addDrawingSegments(session.id, currentStrokeRef.current).catch((err) => {
-        console.error("Failed to save full drawing stroke to DB:", err)
-        // FIX: Provide immediate feedback and reset the canvas on failure
-        toast.error("Your drawing failed to save. Please try again.", {
-          description: "This can happen due to a temporary network issue.",
-        })
-        resetCanvasToTruth() // Erase the invalid line
-      })
+    if (!publicKey || !session || currentStrokeRef.current.length === 0) {
+      currentStrokeRef.current = []
+      return
     }
+
+    const strokeToSave = [...currentStrokeRef.current]
     currentStrokeRef.current = []
-  }, [broadcastDrawingSegments, publicKey, session, resetCanvasToTruth])
+
+    const res = await spendCreditAndDrawStrokeAction(publicKey.toBase58(), session.id, strokeToSave)
+
+    if (!res.success) {
+      toast.error("Your drawing failed to save.", { description: res.error || "Please try again." })
+      await resetCanvasToTruth()
+      await refreshUserData()
+    }
+  }, [broadcastDrawingSegments, publicKey, session, resetCanvasToTruth, refreshUserData])
 
   const handleDrawStart = () => {
     if (credits.paidLines < 1 && credits.freeLines < 1) {
@@ -190,9 +188,16 @@ function DrawPageContent({ params }: { params: { code: string } }) {
       canvasRef.current?.forceStopDrawing()
       return
     }
-    isFirstSegmentOfStroke.current = true
-    broadcastBufferRef.current = []
+
+    // Optimistically decrement UI
+    if (credits.freeLines > 0) {
+      setCredits((p) => ({ ...p, freeLines: p.freeLines - 1 }))
+    } else {
+      setCredits((p) => ({ ...p, paidLines: p.paidLines - 1 }))
+    }
+
     currentStrokeRef.current = []
+    broadcastBufferRef.current = []
 
     if (broadcastIntervalRef.current) clearInterval(broadcastIntervalRef.current)
     broadcastIntervalRef.current = setInterval(broadcastDrawingSegments, BROADCAST_INTERVAL_MS)
@@ -204,39 +209,11 @@ function DrawPageContent({ params }: { params: { code: string } }) {
     }, DRAWING_TIME_LIMIT_MS)
   }
 
-  const handleDraw = async (drawing: Omit<Drawing, "drawer_wallet_address" | "id">) => {
+  const handleDraw = (drawing: Omit<Drawing, "drawer_wallet_address" | "id">) => {
     if (!publicKey || !session) return
-
     const newSegment: DrawingSegment = { ...drawing, drawer_wallet_address: publicKey.toBase58() }
     broadcastBufferRef.current.push(newSegment)
     currentStrokeRef.current.push(newSegment)
-
-    if (isFirstSegmentOfStroke.current) {
-      isFirstSegmentOfStroke.current = false
-      // Optimistically decrement credits in UI
-      if (credits.freeLines > 0) {
-        setCredits((p) => ({ ...p, freeLines: p.freeLines - 1 }))
-      } else {
-        setCredits((p) => ({ ...p, paidLines: p.paidLines - 1 }))
-      }
-
-      try {
-        const res = await spendDrawingCredit(publicKey.toBase58(), session.id, newSegment)
-        if (!res.success) {
-          // FIX: Handle "disappearing lines" bug
-          toast.error("Failed to spend credit. Your last line was not saved.", { description: res.error })
-          canvasRef.current?.forceStopDrawing() // Immediately stop the current drawing action
-          await resetCanvasToTruth() // Erase the invalid line by resetting canvas to server state
-          await refreshUserData() // Correct the credit count in the UI
-        }
-      } catch (error) {
-        console.error("Error spending drawing credit:", error)
-        toast.error("An unexpected error occurred. Your last line was not saved.")
-        canvasRef.current?.forceStopDrawing()
-        await resetCanvasToTruth()
-        await refreshUserData()
-      }
-    }
   }
 
   const handleNuke = async (animation: NukeAnimation) => {

@@ -338,17 +338,26 @@ export async function getSessionData(shortCode: string) {
   return { session, drawings: drawings as Drawing[] }
 }
 
-export async function spendDrawingCredit(drawerWalletAddress: string, sessionId: string, drawing: Omit<Drawing, "id">) {
+export async function spendCreditAndDrawStrokeAction(
+  drawerWalletAddress: string,
+  sessionId: string,
+  segments: { drawing_data: Omit<Drawing, "id" | "drawer_wallet_address"> }[],
+) {
   const supabase = createSupabaseAdminClient()
 
-  const { error } = await supabase.rpc("spend_credit_and_draw", {
+  const drawingDataSegments = segments.map((s) => s.drawing_data)
+
+  const { error } = await supabase.rpc("spend_credit_and_draw_stroke", {
     p_drawer_wallet_address: drawerWalletAddress,
-    p_drawing_data: drawing.drawing_data,
     p_session_id: sessionId,
+    p_segments: drawingDataSegments,
   })
 
-  if (error) return { success: false, error: error.message }
-  revalidatePath("/dashboard")
+  if (error) {
+    console.error("spendCreditAndDrawStrokeAction failed:", error.message)
+    return { success: false, error: error.message }
+  }
+
   return { success: true }
 }
 
@@ -487,20 +496,6 @@ export async function deleteSession(sessionId: string, walletAddress: string) {
   if (deleteError) return { success: false, error: deleteError.message }
 
   revalidatePath("/dashboard")
-  return { success: true }
-}
-
-export async function addDrawingSegments(
-  sessionId: string,
-  segments: { drawer_wallet_address: string; drawing_data: Omit<Drawing, "drawer_wallet_address" | "id"> }[],
-) {
-  const supabase = createSupabaseAdminClient()
-  const { error } = await supabase.rpc("add_drawing_segments", {
-    p_session_id: sessionId,
-    p_segments: segments,
-  })
-
-  if (error) return { success: false, error: error.message }
   return { success: true }
 }
 
@@ -668,4 +663,42 @@ export async function getUserRank(walletAddress: string) {
     console.error("[StreamSketch] Error fetching user rank:", error?.message ?? error)
     return null
   }
+}
+
+// ⬇️ ADD THESE NEW HELPERS (place near the bottom of the file, before the last export if you prefer tidy ordering)
+
+/**
+ * Legacy helper kept for backward-compatibility.
+ * Internally forwards to the new atomic stroke RPC using a
+ * single-segment array so the signature stays the same.
+ */
+export async function spendDrawingCredit(drawerWalletAddress: string, sessionId: string, segment: Omit<Drawing, "id">) {
+  const result = await spendCreditAndDrawStrokeAction(drawerWalletAddress, sessionId, [{ drawing_data: segment }])
+
+  return result
+}
+
+/**
+ * Legacy helper kept for modules that only need to append drawing
+ * segments (e.g. after a replay) without spending credits.
+ * Inserts rows directly into the `drawings` table.
+ */
+export async function addDrawingSegments(sessionId: string, segments: Omit<Drawing, "id" | "session_id">[]) {
+  const supabase = createSupabaseAdminClient()
+
+  // shape rows correctly for bulk insert
+  const rows = segments.map((s) => ({
+    session_id: sessionId,
+    drawer_wallet_address: s.drawer_wallet_address,
+    drawing_data: s.drawing_data,
+  }))
+
+  const { error } = await supabase.from("drawings").insert(rows)
+
+  if (error) {
+    console.error("addDrawingSegments failed:", error.message)
+    return { success: false, error: error.message }
+  }
+
+  return { success: true }
 }
