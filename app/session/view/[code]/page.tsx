@@ -78,13 +78,13 @@ export default function ViewPage({ params }: { params: { code: string } }) {
   const handleSubscription = useCallback(() => {
     if (isInitialSubscription.current) {
       isInitialSubscription.current = false
-      setConnectionStatus("connected")
-      return
+      console.log("[Realtime] Initial subscription successful. Performing sync to ensure data consistency.")
+    } else {
+      console.log("[Realtime] Reconnected. Syncing canvas state...")
+      toast.info("Reconnected! Syncing canvas...")
     }
-    console.log("[Realtime] Reconnected. Syncing canvas state...")
     setConnectionStatus("connected")
-    toast.success("Reconnected! Syncing canvas state...")
-    refreshAllDrawings()
+    refreshAllDrawings() // Always refresh on subscribe/resubscribe to guarantee state.
   }, [refreshAllDrawings])
 
   // Simulate connection status tracking
