@@ -146,7 +146,7 @@ export function TransactionHistory() {
                             <Copy className="h-3 w-3" />
                           </Button>
                           <Link
-                            href={`https://solscan.io/tx/${tx.signature}?cluster=devnet`}
+                            href={`https://solscan.io/tx/${tx.signature}`}
                             target="_blank"
                             rel="noopener noreferrer"
                           >
