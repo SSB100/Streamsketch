@@ -1,76 +1,72 @@
-CREATE OR REPLACE FUNCTION public.spend_credit_and_draw_stroke(
-  p_drawer_wallet_address text,
-  p_session_id uuid,
-  p_segments jsonb[]
+-- This function atomically spends a single line credit and inserts all segments for that one stroke.
+-- This is the primary function for all drawing operations.
+create or replace function spend_credit_and_draw_stroke(
+    p_drawer_wallet_address text,
+    p_session_id uuid,
+    p_segments jsonb[]
 )
-RETURNS void
-LANGUAGE plpgsql
-AS $$
-DECLARE
-  v_has_free_session_credit boolean;
-  v_has_paid_credit boolean;
-  v_streamer_wallet_address text;
-  segment jsonb;
-BEGIN
-  -- 1. Check for free credits first
-  SELECT EXISTS (
-    SELECT 1
-    FROM public.session_free_line_credits sflc
-    WHERE sflc.user_wallet_address = p_drawer_wallet_address
-      AND sflc.session_id = p_session_id
-      AND sflc.amount > 0
-  ) INTO v_has_free_session_credit;
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+    v_user_id uuid;
+    v_free_lines_spent int := 0;
+    v_paid_lines_spent int := 0;
+    v_standard_credits int;
+    v_discounted_credits int;
+    v_session_free_lines int;
+begin
+    -- Get the user's ID
+    select id into v_user_id from users where wallet_address = p_drawer_wallet_address;
+    if v_user_id is null then
+        raise exception 'User not found for wallet address %', p_drawer_wallet_address;
+    end if;
 
-  IF v_has_free_session_credit THEN
-    -- Use a free credit
-    UPDATE public.session_free_line_credits
-    SET amount = amount - 1
-    WHERE user_wallet_address = p_drawer_wallet_address
-      AND session_id = p_session_id;
-  ELSE
-    -- 2. Check for paid credits if no free ones are available
-    SELECT (line_credits_standard > 0 OR line_credits_discounted > 0)
-    INTO v_has_paid_credit
-    FROM public.users
-    WHERE wallet_address = p_drawer_wallet_address;
+    -- Get session-specific free line credits
+    select amount into v_session_free_lines
+    from session_free_line_credits
+    where user_wallet_address = p_drawer_wallet_address and session_id = p_session_id;
 
-    IF COALESCE(v_has_paid_credit, false) THEN
-      -- Use a paid credit (prefer discounted)
-      UPDATE public.users
-      SET
-        line_credits_discounted = CASE
-          WHEN line_credits_discounted > 0 THEN line_credits_discounted - 1
-          ELSE line_credits_discounted
-        END,
-        line_credits_standard = CASE
-          WHEN line_credits_discounted <= 0 AND line_credits_standard > 0 THEN line_credits_standard - 1
-          ELSE line_credits_standard
-        END
-      WHERE wallet_address = p_drawer_wallet_address;
+    if v_session_free_lines is null then
+        v_session_free_lines := 0;
+    end if;
 
-      -- Add revenue for the streamer
-      SELECT owner_wallet_address INTO v_streamer_wallet_address
-      FROM public.sessions
-      WHERE id = p_session_id;
+    -- Use a free session credit if available
+    if v_session_free_lines > 0 then
+        update session_free_line_credits
+        set amount = amount - 1
+        where user_wallet_address = p_drawer_wallet_address and session_id = p_session_id;
+        v_free_lines_spent := 1;
+    else
+        -- If no free credits, use a paid credit
+        -- Lock the user row to prevent race conditions on credit updates
+        select line_credits_standard, line_credits_discounted
+        into v_standard_credits, v_discounted_credits
+        from users
+        where id = v_user_id
+        for update;
 
-      IF v_streamer_wallet_address IS NOT NULL THEN
-        UPDATE public.revenue
-        SET unclaimed_sol = unclaimed_sol + (0.00005 * 0.5) -- 0.00005 SOL per line, 50% share
-        WHERE streamer_wallet_address = v_streamer_wallet_address;
-      END IF;
+        if (v_standard_credits + v_discounted_credits) < 1 then
+            raise exception 'Insufficient paid line credits.';
+        end if;
 
-    ELSE
-      -- 3. No credits available, raise an error
-      RAISE EXCEPTION 'Insufficient line credits.';
-    END IF;
-  END IF;
+        -- Logic to spend discounted credits first
+        if v_discounted_credits > 0 then
+            update users set line_credits_discounted = line_credits_discounted - 1 where id = v_user_id;
+        else
+            update users set line_credits_standard = line_credits_standard - 1 where id = v_user_id;
+        end if;
+        v_paid_lines_spent := 1;
+    end if;
 
-  -- 4. If credit was successfully spent, insert all drawing segments
-  FOREACH segment IN ARRAY p_segments
-  LOOP
-    INSERT INTO public.drawings (session_id, drawer_wallet_address, drawing_data)
-    VALUES (p_session_id, p_drawer_wallet_address, segment);
-  END LOOP;
+    -- Now, insert all drawing segments for the stroke using a more efficient unnest
+    if array_length(p_segments, 1) > 0 then
+        insert into drawings(session_id, drawer_wallet_address, drawing_data)
+        select p_session_id, p_drawer_wallet_address, unnest_segment
+        from unnest(p_segments) as unnest_segment;
+    end if;
 
-END;
+end;
 $$;
