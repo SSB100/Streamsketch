@@ -23,6 +23,8 @@ export default function ViewPage({ params }: { params: { code: string } }) {
   const lastNukeTimestampRef = useRef<number>(0)
   const isInitialSubscription = useRef(true)
 
+  const drawUrl = `https://streamsketch.tech/session/draw/${params.code}`
+
   // --- Realtime Channel Handlers ---
   const handleIncomingDraw = useCallback(({ drawing }: { drawing: Drawing }) => {
     if (new Date(drawing.created_at).getTime() < lastNukeTimestampRef.current) {
@@ -184,8 +186,6 @@ export default function ViewPage({ params }: { params: { code: string } }) {
     )
   }
 
-  const drawUrl = `https://streamsketch.tech/session/draw/${params.code}`
-
   if (isLoading && drawings.length === 0) {
     return <div className="flex h-screen w-full items-center justify-center bg-deep-space text-white">Loading...</div>
   }
@@ -203,30 +203,41 @@ export default function ViewPage({ params }: { params: { code: string } }) {
       ref={fullscreenContainerRef}
       className="relative flex h-screen w-full flex-col items-center justify-center bg-deep-space p-4"
     >
-      <NukeAnimationOverlay nukeEvent={nukeEvent} />
-      <div className="absolute left-4 top-4 flex items-center gap-4">
+      <div className="z-50">
+        <NukeAnimationOverlay nukeEvent={nukeEvent} />
+      </div>
+
+      {/* Top Left UI */}
+      <div className="absolute left-4 top-4 z-20">
         <div className="flex items-center gap-2 rounded-full bg-black/50 px-4 py-2 text-white backdrop-blur-sm">
           <Eye className="h-5 w-5 text-green-400" />
           <span className="font-bold">STREAMER VIEW (READ-ONLY)</span>
         </div>
-        <div className="rounded-full bg-black/50 px-3 py-2 backdrop-blur-sm">
-          <ConnectionIndicator />
-        </div>
       </div>
-      <div className="absolute right-4 top-4 flex items-center gap-4">
+
+      {/* Top Center UI - SHAREABLE URL */}
+      <div className="absolute top-4 left-1/2 z-20 -translate-x-1/2 flex items-center gap-2 rounded-full bg-black/50 px-4 py-2 text-white backdrop-blur-sm">
+        <span className="whitespace-nowrap text-sm font-semibold text-muted-foreground">Shareable Draw URL:</span>
+        <span className="whitespace-nowrap font-mono text-base font-bold text-white">{drawUrl}</span>
+        <button
+          onClick={() => copyToClipboard(drawUrl)}
+          className="ml-2 transition-transform hover:scale-110 active:scale-95"
+        >
+          <Copy className="h-5 w-5" />
+          <span className="sr-only">Copy URL</span>
+        </button>
+      </div>
+
+      {/* Top Right UI */}
+      <div className="absolute right-4 top-4 z-20 flex items-center gap-4">
         <Button variant="outline" size="sm" onClick={refreshAllDrawings} disabled={isLoading}>
           {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
           Sync Canvas
         </Button>
-        <div className="flex items-center gap-2 rounded-full bg-black/50 px-3 py-2 text-white backdrop-blur-sm">
-          <span className="text-muted-foreground">Draw URL:</span>
-          <span className="font-mono text-lg font-bold text-neon-pink">{drawUrl}</span>
-          <button onClick={() => copyToClipboard(drawUrl)} className="ml-1 transition-transform hover:scale-110">
-            <Copy className="h-4 w-4" />
-          </button>
-        </div>
       </div>
-      <div className="relative w-full max-w-full h-full max-h-full aspect-[16/9]">
+
+      {/* Main Canvas */}
+      <div className="relative z-10 w-full max-w-full h-full max-h-full aspect-[16/9]">
         <Canvas
           ref={canvasRef}
           width={1280}
@@ -234,11 +245,20 @@ export default function ViewPage({ params }: { params: { code: string } }) {
           isDrawable={false}
           initialDrawings={drawings}
           onDrawStart={() => false}
-          onEnd={() => {}}
+          onDrawEnd={() => {}}
           className="h-full w-full border-white/20"
         />
       </div>
-      <div className="absolute bottom-4 right-4">
+
+      {/* Bottom Left UI */}
+      <div className="absolute bottom-4 left-4 z-20">
+        <div className="rounded-full bg-black/50 px-3 py-2 backdrop-blur-sm">
+          <ConnectionIndicator />
+        </div>
+      </div>
+
+      {/* Bottom Right UI */}
+      <div className="absolute bottom-4 right-4 z-20">
         <Button onClick={toggleFullscreen} variant="outline" size="icon" className="bg-black/50">
           {isFullscreen ? <Minimize className="h-5 w-5 text-white" /> : <Maximize className="h-5 w-5 text-white" />}
         </Button>
