@@ -14,9 +14,9 @@ import { useRealtimeChannel } from "@/hooks/use-realtime-channel"
 import {
   getSessionData,
   getUserData,
-  processNukePurchase,
   getFreeCreditsForSession,
   recordDrawingAction,
+  initiateNukeAction, // <-- Import the new action
 } from "@/app/actions"
 import { Rocket, Edit, Bomb, RefreshCw } from "lucide-react"
 import { toast } from "sonner"
@@ -31,13 +31,11 @@ import {
 } from "@/components/ui/dialog"
 import type { NukeAnimation } from "@/lib/nuke-animations"
 import { APP_WALLET_ADDRESS } from "@/lib/constants"
-import { useFreeNukeAction } from "@/hooks/use-free-nuke-action"
 import { ErrorBoundary } from "@/components/error-boundary"
 
 function DrawPageContent({ params }: { params: { code: string } }) {
   const { publicKey, sendTransaction, wallet } = useWallet()
   const { connection } = useConnection()
-  const freeNukeAction = useFreeNukeAction()
 
   const [session, setSession] = useState<{ id: string; owner_wallet_address: string } | null>(null)
   const [drawings, setDrawings] = useState<Drawing[]>([])
@@ -55,27 +53,26 @@ function DrawPageContent({ params }: { params: { code: string } }) {
 
   const canvasRef = useRef<CanvasHandle>(null)
 
-  // --- Realtime Channel (Nukes Only on Draw Page) ---
+  // This handler is now triggered by the server broadcast, ensuring all clients are in sync.
   const handleIncomingNuke = useCallback(
     ({ username, animationId }: { username: string | null; animationId: string }) => {
-      setDrawings([]) // Clear local drawings state
-      canvasRef.current?.clearCanvas()
-      setNukeEvent({ username, animationId })
+      setDrawings([]) // Clear local drawings state array
+      canvasRef.current?.clearCanvas() // Clear the visual canvas
+      setNukeEvent({ username, animationId }) // Trigger the animation overlay
     },
     [],
   )
 
-  // The draw page doesn't need to listen for other drawings, only nukes.
+  // The draw page only needs to listen for nukes, not other drawings.
   const channelOptions = useMemo(
     () => ({
       onNukeBroadcast: handleIncomingNuke,
-      onDrawBroadcast: () => {}, // No-op on the draw page
+      onDrawBroadcast: () => {}, // No-op
     }),
     [handleIncomingNuke],
   )
   useRealtimeChannel(session?.id ?? null, channelOptions)
 
-  // --- Data Fetching ---
   const refreshUserData = useCallback(async () => {
     if (!publicKey || !session) return
     try {
@@ -95,7 +92,6 @@ function DrawPageContent({ params }: { params: { code: string } }) {
     }
   }, [publicKey, session])
 
-  // --- Initial Page Load ---
   useEffect(() => {
     const bootstrap = async () => {
       setIsLoading(true)
@@ -118,14 +114,12 @@ function DrawPageContent({ params }: { params: { code: string } }) {
     bootstrap()
   }, [params.code])
 
-  // Refresh user-specific data when the session or user changes
   useEffect(() => {
     if (session && publicKey) {
       refreshUserData()
     }
   }, [session, publicKey, refreshUserData])
 
-  // --- Canvas Callbacks ---
   const handleDrawStart = () => {
     if (!publicKey) {
       toast.error("Please connect your wallet to draw.")
@@ -140,7 +134,6 @@ function DrawPageContent({ params }: { params: { code: string } }) {
 
   const handleDrawEnd = async (line: Omit<Drawing["drawing_data"], "drawer_wallet_address">) => {
     if (!publicKey || !session) return
-
     const optimisticDrawing: Drawing = {
       id: Date.now(),
       drawer_wallet_address: publicKey.toBase58(),
@@ -148,9 +141,7 @@ function DrawPageContent({ params }: { params: { code: string } }) {
     }
     setDrawings((prev) => [...prev, optimisticDrawing])
     setCredits((p) => (p.freeLines > 0 ? { ...p, freeLines: p.freeLines - 1 } : { ...p, paidLines: p.paidLines - 1 }))
-
     const { success, error } = await recordDrawingAction(publicKey.toBase58(), session.id, line)
-
     if (!success) {
       toast.error("Failed to save drawing", { description: error })
       setDrawings((prev) => prev.filter((d) => d.id !== optimisticDrawing.id))
@@ -158,50 +149,45 @@ function DrawPageContent({ params }: { params: { code: string } }) {
     }
   }
 
-  // --- Nuke Handler ---
+  // --- NEW Nuke Handler ---
   const handleNuke = async (animation: NukeAnimation) => {
     if (!publicKey || !wallet || !sendTransaction || !session) {
       toast.error("Wallet not fully connected or session invalid.")
       return
     }
 
-    if (animation.id === "free_nuke") {
-      const result = await freeNukeAction(publicKey.toBase58(), session.id)
-      if (!result.success) {
-        toast.error("Failed to use free nuke.", { description: result.error })
-        return
-      }
-      setCredits((p) => ({ ...p, freeNukes: p.freeNukes - 1 }))
-      canvasRef.current?.clearCanvas()
-      setNukeEvent({ username: credits.username, animationId: animation.id })
-      setIsNukeDialogOpen(false)
-      return
-    }
+    let result: { success: boolean; error?: string }
+    let signature: string | undefined = undefined
 
     try {
-      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed")
-      const transaction = new Transaction({ feePayer: publicKey, blockhash, lastValidBlockHeight }).add(
-        SystemProgram.transfer({
-          fromPubkey: publicKey,
-          toPubkey: APP_WALLET_ADDRESS,
-          lamports: animation.price * LAMPORTS_PER_SOL,
-        }),
-      )
-      const signature = await sendTransaction(transaction, connection)
-      toast.info("Transaction sent! Awaiting confirmation...")
-      await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, "confirmed")
-      toast.success("Payment confirmed! Nuking the board...")
+      if (animation.id !== "free_nuke") {
+        // Handle payment for paid nukes
+        const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed")
+        const transaction = new Transaction({ feePayer: publicKey, blockhash, lastValidBlockHeight }).add(
+          SystemProgram.transfer({
+            fromPubkey: publicKey,
+            toPubkey: APP_WALLET_ADDRESS,
+            lamports: animation.price * LAMPORTS_PER_SOL,
+          }),
+        )
+        signature = await sendTransaction(transaction, connection)
+        toast.info("Transaction sent! Awaiting confirmation...")
+        await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, "confirmed")
+        toast.success("Payment confirmed! Nuking the board...")
+      }
 
-      canvasRef.current?.clearCanvas()
-      setNukeEvent({ username: credits.username, animationId: animation.id })
-      setIsNukeDialogOpen(false)
+      // Call the single, authoritative server action
+      result = await initiateNukeAction(publicKey.toBase58(), session.id, animation, signature)
 
-      processNukePurchase(publicKey.toBase58(), session.id, animation, signature).catch((err) => {
-        console.error("Background nuke processing failed:", err)
-      })
+      if (result.success) {
+        setIsNukeDialogOpen(false)
+        await refreshUserData() // Refresh credits
+      } else {
+        toast.error("Failed to trigger nuke.", { description: result.error })
+      }
     } catch (error: any) {
-      console.error("Nuke purchase failed", error)
-      toast.error("Nuke purchase failed", { description: error.message, duration: 6000 })
+      console.error("Nuke failed", error)
+      toast.error("Nuke failed", { description: error.message, duration: 6000 })
     }
   }
 
