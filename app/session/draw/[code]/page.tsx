@@ -55,9 +55,7 @@ function DrawPageContent({ params }: { params: { code: string } }) {
   })
   const [isLoading, setIsLoading] = useState(true)
   const [isNukeDialogOpen, setIsNukeDialogOpen] = useState(false)
-  const [nukeEvent, setNukeEvent] = useState<{ username: string | null; animationId: string; eventKey: number } | null>(
-    null,
-  )
+  const [nukeEvent, setNukeEvent] = useState<{ username: string | null; animationId: string } | null>(null)
   const [color, setColor] = useState("#FFFFFF")
   const [brushSize, setBrushSize] = useState(5)
 
@@ -80,7 +78,7 @@ function DrawPageContent({ params }: { params: { code: string } }) {
   const handleIncomingNuke = useCallback(
     ({ username, animationId }: { username: string | null; animationId: string }) => {
       canvasRef.current?.clearCanvas()
-      setNukeEvent({ username, animationId, eventKey: Date.now() })
+      setNukeEvent({ username, animationId })
     },
     [],
   )
@@ -96,8 +94,9 @@ function DrawPageContent({ params }: { params: { code: string } }) {
     try {
       const [paidData, freeData] = await Promise.all([
         getUserData(publicKey.toBase58()),
-        getFreeCreditsForSession(publicKey.toBase58(), session.id),
+        getFreeCreditsForSession(publicKey.toBase58(), session.id), // Changed from session.owner_wallet_address to session.id
       ])
+      console.log("[DrawPage] Refreshed free credits for session:", session.id, freeData)
       setCredits({
         paidLines: paidData.lineCredits,
         username: paidData.username,
@@ -109,17 +108,6 @@ function DrawPageContent({ params }: { params: { code: string } }) {
       toast.error("Could not refresh your credit balance.")
     }
   }, [publicKey, session])
-
-  // This function resets the canvas to the server's state.
-  const resetCanvasToTruth = useCallback(async () => {
-    try {
-      const { drawings: serverDrawings } = await getSessionData(params.code)
-      setInitialDrawings(serverDrawings) // This triggers the canvas useEffect to redraw from a clean slate
-    } catch (err) {
-      console.error("Failed to reset canvas to server state:", err)
-      toast.error("Could not sync with the server. Please refresh.")
-    }
-  }, [params.code])
 
   useEffect(() => {
     async function bootstrap() {
@@ -134,7 +122,17 @@ function DrawPageContent({ params }: { params: { code: string } }) {
         setSession(s as { id: string; owner_wallet_address: string })
         setInitialDrawings(d)
         if (publicKey) {
-          await refreshUserData()
+          const [paidData, freeData] = await Promise.all([
+            getUserData(publicKey.toBase58()),
+            getFreeCreditsForSession(publicKey.toBase58(), s.id), // Changed from s.owner_wallet_address to s.id
+          ])
+          console.log("[DrawPage] Free credits for session:", s.id, freeData)
+          setCredits({
+            paidLines: paidData.lineCredits,
+            username: paidData.username,
+            freeLines: freeData.freeLines,
+            freeNukes: freeData.freeNukes,
+          })
         }
       } catch (err) {
         console.error("Bootstrap failed:", err)
@@ -144,7 +142,7 @@ function DrawPageContent({ params }: { params: { code: string } }) {
       }
     }
     bootstrap()
-  }, [params.code, publicKey, refreshUserData])
+  }, [params.code, publicKey])
 
   const broadcastDrawingSegments = useCallback(() => {
     if (broadcastBufferRef.current.length > 0 && channel) {
@@ -162,7 +160,7 @@ function DrawPageContent({ params }: { params: { code: string } }) {
     if (publicKey && session && currentStrokeRef.current.length > 0) {
       addDrawingSegments(session.id, currentStrokeRef.current).catch((err) => {
         console.error("Failed to save full drawing stroke to DB:", err)
-        // Don't toast here, as the spend credit failure is the real source of truth
+        toast.error("Failed to save your drawing. Please try again.")
       })
     }
     currentStrokeRef.current = []
@@ -170,7 +168,7 @@ function DrawPageContent({ params }: { params: { code: string } }) {
 
   const handleDrawStart = () => {
     if (credits.paidLines < 1 && credits.freeLines < 1) {
-      toast.error("You are out of line credits! Please purchase more.")
+      toast.error("Out of line credits!")
       canvasRef.current?.forceStopDrawing()
       return
     }
@@ -197,7 +195,6 @@ function DrawPageContent({ params }: { params: { code: string } }) {
 
     if (isFirstSegmentOfStroke.current) {
       isFirstSegmentOfStroke.current = false
-      // Optimistically decrement credits in UI
       if (credits.freeLines > 0) {
         setCredits((p) => ({ ...p, freeLines: p.freeLines - 1 }))
       } else {
@@ -207,18 +204,15 @@ function DrawPageContent({ params }: { params: { code: string } }) {
       try {
         const res = await spendDrawingCredit(publicKey.toBase58(), session.id, newSegment)
         if (!res.success) {
-          // FIX: Handle "disappearing lines" bug
-          toast.error("Failed to spend credit. Your last line was not saved.", { description: res.error })
-          canvasRef.current?.forceStopDrawing() // Immediately stop the current drawing action
-          await resetCanvasToTruth() // Erase the invalid line by resetting canvas to server state
-          await refreshUserData() // Correct the credit count in the UI
+          toast.error("Failed to spend credit", { description: res.error })
+          await refreshUserData()
+          canvasRef.current?.forceStopDrawing()
         }
       } catch (error) {
         console.error("Error spending drawing credit:", error)
-        toast.error("An unexpected error occurred. Your last line was not saved.")
-        canvasRef.current?.forceStopDrawing()
-        await resetCanvasToTruth()
+        toast.error("Failed to spend credit")
         await refreshUserData()
+        canvasRef.current?.forceStopDrawing()
       }
     }
   }
@@ -245,7 +239,7 @@ function DrawPageContent({ params }: { params: { code: string } }) {
           payload: { username: usernameForBroadcast, animationId: "default" },
         })
         canvasRef.current?.clearCanvas()
-        setNukeEvent({ username: usernameForBroadcast, animationId: "default", eventKey: Date.now() })
+        setNukeEvent({ username: usernameForBroadcast, animationId: "default" })
         setIsNukeDialogOpen(false)
         setCredits((p) => ({ ...p, freeNukes: p.freeNukes - 1 }))
       } catch (error: any) {
@@ -278,7 +272,7 @@ function DrawPageContent({ params }: { params: { code: string } }) {
         payload: { username: usernameForBroadcast, animationId: animation.id },
       })
       canvasRef.current?.clearCanvas()
-      setNukeEvent({ username: usernameForBroadcast, animationId: animation.id, eventKey: Date.now() })
+      setNukeEvent({ username: usernameForBroadcast, animationId: animation.id })
       setIsNukeDialogOpen(false)
 
       processNukePurchase(publicKey.toBase58(), session.id, animation, signature).catch((err) => {

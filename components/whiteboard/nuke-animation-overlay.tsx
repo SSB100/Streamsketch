@@ -7,6 +7,7 @@ interface NukeAnimationOverlayProps {
   nukeEvent: {
     username: string | null
     animationId: string
+    eventKey: number // Expect a unique key for each event
   } | null
 }
 
@@ -48,7 +49,7 @@ export function NukeAnimationOverlay({ nukeEvent }: NukeAnimationOverlayProps) {
     <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center overflow-hidden">
       {animation.video && (
         <video
-          key={nukeEvent.animationId} // Add key to force re-render
+          key={nukeEvent.eventKey} // FIX: Use the unique eventKey to force re-render
           src={animation.video}
           autoPlay
           muted
