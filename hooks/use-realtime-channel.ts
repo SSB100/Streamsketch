@@ -110,5 +110,30 @@ export function useRealtimeChannel(sessionId: string | null, options: UseRealtim
     }
   }, [])
 
+  // Add a proactive health check to detect silent connection drops
+  useEffect(() => {
+    if (!channelRef.current) return
+
+    const healthCheckInterval = setInterval(() => {
+      const channel = channelRef.current
+      if (!channel) return
+
+      // If the channel state is closed or errored, but our component thinks it's connected,
+      // it's a silent drop. Force a reconnection state.
+      if ((channel.state === "closed" || channel.state === "errored") && connectionStatus === "connected") {
+        console.warn(
+          `[Realtime Health Check] Detected stale connection (state: ${channel.state}). Forcing reconnect status.`,
+        )
+        setConnectionStatus("reconnecting")
+        // The Supabase client's automatic reconnection should eventually trigger the 'SUBSCRIBED' event.
+        // This state change ensures our UI reflects the intermediate state.
+      }
+    }, 15000) // Check every 15 seconds
+
+    return () => {
+      clearInterval(healthCheckInterval)
+    }
+  }, [connectionStatus]) // Rerun this effect if connectionStatus changes
+
   return { channel: channelRef.current, connectionStatus }
 }
