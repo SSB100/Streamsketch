@@ -1,35 +1,40 @@
 "use client"
 
 import type React from "react"
-import { createContext, useContext, useMemo } from "react"
-import type { SupabaseClient } from "@supabase/supabase-js"
-import { createSupabaseBrowserClient } from "@/lib/supabase/client"
 
+import { createContext, useContext, useState } from "react"
+import type { SupabaseClient } from "@supabase/supabase-js"
+import { getSupabaseBrowserClient } from "@/lib/supabase/client"
+
+// -----------------------------------------------------------------------------
+// Context
+// -----------------------------------------------------------------------------
 type SupabaseContextType = {
   supabase: SupabaseClient
 }
 
 const SupabaseContext = createContext<SupabaseContextType | undefined>(undefined)
 
-export function SupabaseProvider({ children }: { children: React.ReactNode }) {
-  // Use useMemo to ensure the client is only created once per component lifecycle
-  const supabaseClient = useMemo(() => {
-    return createSupabaseBrowserClient()
-  }, [])
+// -----------------------------------------------------------------------------
+// Provider
+// -----------------------------------------------------------------------------
+function SupabaseProvider({ children }: { children: React.ReactNode }) {
+  // Use the singleton helper so we never create more than one instance.
+  const [supabase] = useState(getSupabaseBrowserClient)
 
-  const contextValue = useMemo(
-    () => ({
-      supabase: supabaseClient,
-    }),
-    [supabaseClient],
-  )
-
-  return <SupabaseContext.Provider value={contextValue}>{children}</SupabaseContext.Provider>
+  return <SupabaseContext.Provider value={{ supabase }}>{children}</SupabaseContext.Provider>
 }
 
-export const useSupabase = () => {
+// Export both a named and default export so either import style works.
+export { SupabaseProvider }
+export default SupabaseProvider
+
+// -----------------------------------------------------------------------------
+// Hook
+// -----------------------------------------------------------------------------
+export function useSupabase() {
   const context = useContext(SupabaseContext)
-  if (context === undefined) {
+  if (!context) {
     throw new Error("useSupabase must be used within a SupabaseProvider")
   }
   return context.supabase

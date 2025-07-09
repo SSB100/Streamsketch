@@ -193,7 +193,7 @@ export function SessionManager({ initialSessions }: SessionManagerProps) {
                         className="border-secondary text-secondary hover:bg-secondary/10 hover:text-secondary bg-transparent"
                         onClick={() =>
                           copyToClipboard(
-                            `https://streamsketch.tech/session/view/${session.short_code}`,
+                            `${window.location.origin}/session/view/${session.short_code}`,
                             "OBS view link copied!",
                           )
                         }
@@ -206,7 +206,7 @@ export function SessionManager({ initialSessions }: SessionManagerProps) {
                         className="border-primary text-primary hover:bg-primary/10 hover:text-primary bg-transparent"
                         onClick={() =>
                           copyToClipboard(
-                            `https://streamsketch.tech/session/draw/${session.short_code}`,
+                            `${window.location.origin}/session/draw/${session.short_code}`,
                             "Viewer draw link copied!",
                           )
                         }

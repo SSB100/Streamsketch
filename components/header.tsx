@@ -2,6 +2,7 @@
 
 import Link from "next/link"
 import Image from "next/image"
+import { usePathname, useRouter } from "next/navigation"
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui"
 import { useWallet } from "@solana/wallet-adapter-react"
 import { Button } from "./ui/button"
@@ -9,18 +10,17 @@ import { Trophy, Lightbulb } from "lucide-react"
 
 export function Header() {
   const { connected } = useWallet()
+  const pathname = usePathname()
+  const router = useRouter()
 
-  const scrollToLeaderboard = () => {
-    const leaderboardElement = document.getElementById("leaderboard")
-    if (leaderboardElement) {
-      leaderboardElement.scrollIntoView({ behavior: "smooth" })
-    }
-  }
-
-  const scrollToHowItWorks = () => {
-    const howItWorksElement = document.getElementById("how-it-works")
-    if (howItWorksElement) {
-      howItWorksElement.scrollIntoView({ behavior: "smooth" })
+  const handleScrollTo = (id: string) => {
+    if (pathname === "/") {
+      const element = document.getElementById(id)
+      if (element) {
+        element.scrollIntoView({ behavior: "smooth" })
+      }
+    } else {
+      router.push(`/#${id}`)
     }
   }
 
@@ -32,11 +32,19 @@ export function Header() {
           <span className="text-xl font-bold tracking-tighter text-white">StreamSketch</span>
         </Link>
         <nav className="flex items-center gap-4">
-          <Button variant="ghost" className="text-white hover:text-primary" onClick={scrollToHowItWorks}>
+          <Button
+            variant="ghost"
+            className="text-white hover:text-primary"
+            onClick={() => handleScrollTo("how-it-works")}
+          >
             <Lightbulb className="mr-2 h-4 w-4" />
             How It Works
           </Button>
-          <Button variant="ghost" className="text-white hover:text-yellow-400" onClick={scrollToLeaderboard}>
+          <Button
+            variant="ghost"
+            className="text-white hover:text-yellow-400"
+            onClick={() => handleScrollTo("leaderboard")}
+          >
             <Trophy className="mr-2 h-4 w-4" />
             Leaderboard
           </Button>

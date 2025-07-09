@@ -1,7 +1,7 @@
 "use client"
 
 import { useRouter } from "next/navigation"
-import React from "react"
+import React, { useEffect } from "react"
 import { Header } from "@/components/header"
 import { Leaderboard } from "@/components/leaderboard"
 import { Button } from "@/components/ui/button"
@@ -23,6 +23,20 @@ export default function HomePage() {
       router.push(`/session/draw/${sessionCode.trim().toUpperCase()}`)
     }
   }
+
+  useEffect(() => {
+    const hash = window.location.hash
+    if (hash) {
+      // A small timeout ensures the element is available in the DOM after navigation.
+      setTimeout(() => {
+        const id = hash.replace("#", "")
+        const element = document.getElementById(id)
+        if (element) {
+          element.scrollIntoView({ behavior: "smooth" })
+        }
+      }, 100)
+    }
+  }, [])
 
   return (
     <div className="flex min-h-screen flex-col">

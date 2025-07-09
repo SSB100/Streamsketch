@@ -1,8 +1,6 @@
 "use client"
 
-import { useCallback } from "react"
-
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { useWallet } from "@solana/wallet-adapter-react"
 import { Header } from "@/components/header"
 import { StatsCards } from "@/components/dashboard/stats-cards"
@@ -19,6 +17,7 @@ import { RewardManager } from "@/components/dashboard/reward-manager"
 import { ErrorBoundary } from "@/components/error-boundary"
 import { FreeCreditsDisplay } from "@/components/dashboard/free-credits-display"
 
+// Define the types for our state
 type UserData = {
   lineCredits: number
   unclaimedSol: number
@@ -28,14 +27,6 @@ type UserData = {
   nukesGifted: number
   totalFreeLines: number
   totalFreeNukes: number
-  sessions: Session[]
-  freeCreditSessions: Array<{
-    session_id: string
-    session_code: string
-    free_lines: number
-    free_nukes: number
-    granted_at: string
-  }>
 }
 
 type Session = {
@@ -45,30 +36,41 @@ type Session = {
   created_at: string
 }
 
+type FreeCreditSession = {
+  session_id: string
+  session_code: string
+  free_lines: number
+  free_nukes: number
+  granted_at: string
+}
+
+// A skeleton component for the loading state
 function DashboardSkeleton() {
   return (
     <div className="flex flex-col gap-8">
-      <Skeleton className="h-[400px] w-full" />
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-6">
-        <Skeleton className="h-[125px] w-full" />
-        <Skeleton className="h-[125px] w-full" />
+      <Skeleton className="h-[125px] w-full" /> {/* Rank Display */}
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <Skeleton className="h-[125px] w-full" />
         <Skeleton className="h-[125px] w-full" />
         <Skeleton className="h-[125px] w-full" />
         <Skeleton className="h-[125px] w-full" />
       </div>
-      <Skeleton className="h-[160px] w-full" />
-      <Skeleton className="h-[280px] w-full" />
-      <Skeleton className="h-[300px] w-full" />
-      <Skeleton className="h-[400px] w-full" />
+      <Skeleton className="h-[160px] w-full" /> {/* Placeholder for Free Credits Display */}
+      <Skeleton className="h-[120px] w-full" /> {/* Profile Manager */}
+      <Skeleton className="h-[280px] w-full" /> {/* Reward Manager */}
+      <Skeleton className="h-[300px] w-full" /> {/* Purchase Credits */}
+      <Skeleton className="h-[400px] w-full" /> {/* Session Manager */}
+      <Skeleton className="h-[400px] w-full" /> {/* Transaction History */}
     </div>
   )
 }
 
+// The main content component for the dashboard
 function DashboardContent() {
   const { connected, publicKey, connecting } = useWallet()
   const [userData, setUserData] = useState<UserData | null>(null)
   const [sessions, setSessions] = useState<Session[]>([])
+  const [freeCreditSessions, setFreeCreditSessions] = useState<FreeCreditSession[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [hasError, setHasError] = useState(false)
 
@@ -77,44 +79,42 @@ function DashboardContent() {
 
     setHasError(false)
     try {
-      const [data, userSessions, freeCreditSessions] = await Promise.allSettled([
+      // Fetch all data in parallel for a faster load
+      const [dataResult, sessionsResult, freeCreditsResult] = await Promise.allSettled([
         getUserData(publicKey.toBase58()),
         getUserSessions(publicKey.toBase58()),
         getUserFreeCreditSessions(publicKey.toBase58()),
       ])
 
-      if (data.status === "fulfilled") {
-        const baseUserData = data.value
-        const sessions = userSessions.status === "fulfilled" ? userSessions.value : []
-        const freeCredits = freeCreditSessions.status === "fulfilled" ? freeCreditSessions.value : []
-
-        setUserData({
-          ...baseUserData,
-          sessions,
-          freeCreditSessions: freeCredits,
-        })
-        setSessions(sessions)
+      // Process user data
+      if (dataResult.status === "fulfilled") {
+        setUserData(dataResult.value)
       } else {
-        console.error("Failed to load user data:", data.reason)
-        toast.error("Could not load your account data. Some features may not work correctly.")
-        setUserData({
-          lineCredits: 0,
-          unclaimedSol: 0,
-          totalClaimedSol: 0,
-          username: null,
-          linesGifted: 0,
-          nukesGifted: 0,
-          totalFreeLines: 0,
-          totalFreeNukes: 0,
-          sessions: [],
-          freeCreditSessions: [],
-        })
+        console.error("Failed to load user data:", dataResult.reason)
+        toast.error("Could not load your account data.")
+        setUserData(null) // Clear stale data on error
+        throw new Error("Failed to load user data")
+      }
+
+      // Process sessions
+      if (sessionsResult.status === "fulfilled") {
+        setSessions(sessionsResult.value)
+      } else {
+        console.error("Failed to load sessions:", sessionsResult.reason)
         setSessions([])
+      }
+
+      // Process free credit sessions
+      if (freeCreditsResult.status === "fulfilled") {
+        setFreeCreditSessions(freeCreditsResult.value)
+      } else {
+        console.error("Failed to load free credits:", freeCreditsResult.reason)
+        setFreeCreditSessions([])
       }
     } catch (error) {
       console.error("Failed to load dashboard data:", error)
       setHasError(true)
-      toast.error("Could not load your dashboard data. Please try refreshing the page.")
+      toast.error("Could not load your dashboard. Please try refreshing.")
     }
   }, [publicKey])
 
@@ -128,6 +128,7 @@ function DashboardContent() {
       setIsLoading(false)
       setUserData(null)
       setSessions([])
+      setFreeCreditSessions([])
       setHasError(false)
       return
     }
@@ -136,90 +137,90 @@ function DashboardContent() {
     refreshAllData().finally(() => setIsLoading(false))
   }, [connected, publicKey, connecting, refreshAllData])
 
+  // Render error state
   if (hasError) {
     return (
-      <div className="container py-8">
-        <h1 className="mb-6 text-3xl font-bold tracking-tighter text-white">Dashboard</h1>
-        <div className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-red-500/50 bg-red-500/5 py-24 text-center">
-          <h2 className="text-2xl font-bold text-white">Failed to Load Dashboard</h2>
-          <p className="mt-2 text-muted-foreground">There was an error loading your dashboard data.</p>
-          <button
-            onClick={() => {
-              setHasError(false)
-              setIsLoading(true)
-              refreshAllData().finally(() => setIsLoading(false))
+      <div className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-red-500/50 bg-red-500/5 py-24 text-center">
+        <h2 className="text-2xl font-bold text-white">Failed to Load Dashboard</h2>
+        <p className="mt-2 text-muted-foreground">There was an error loading your dashboard data.</p>
+        <button
+          onClick={() => {
+            setHasError(false)
+            setIsLoading(true)
+            refreshAllData().finally(() => setIsLoading(false))
+          }}
+          className="mt-4 rounded-lg bg-primary px-4 py-2 text-primary-foreground hover:bg-primary/90"
+        >
+          Try Again
+        </button>
+      </div>
+    )
+  }
+
+  // Render loading or disconnected state
+  if (isLoading || connecting) {
+    return <DashboardSkeleton />
+  }
+
+  if (!connected || !userData) {
+    return (
+      <div className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-border/50 bg-white/5 py-24 text-center">
+        <h2 className="text-2xl font-bold text-white">Connect Your Wallet</h2>
+        <p className="mt-2 text-muted-foreground">Please connect your wallet to access your dashboard.</p>
+        <div className="mt-6">
+          <WalletMultiButton
+            style={{
+              backgroundColor: "#F000B8",
+              color: "#fff",
+              borderRadius: "8px",
+              fontSize: "16px",
+              fontWeight: "600",
+              height: "50px",
             }}
-            className="mt-4 rounded-lg bg-primary px-4 py-2 text-primary-foreground hover:bg-primary/90"
-          >
-            Try Again
-          </button>
+          />
         </div>
       </div>
     )
   }
 
+  // Render the full dashboard
   return (
-    <main className="flex-1">
-      <div className="container py-8">
-        {isLoading || connecting ? (
-          <>
-            <h1 className="mb-6 text-3xl font-bold tracking-tighter text-white">Dashboard</h1>
-            <DashboardSkeleton />
-          </>
-        ) : connected && userData ? (
-          <>
-            <h1 className="mb-6 text-3xl font-bold tracking-tighter text-white">Dashboard</h1>
-            <div className="flex flex-col gap-8">
-              <RankDisplay totalEarnings={userData.unclaimedSol + userData.totalClaimedSol} />
-              <StatsCards
-                lineCredits={userData.lineCredits}
-                unclaimedSol={userData.unclaimedSol}
-                totalClaimedSol={userData.totalClaimedSol}
-                totalFreeLines={userData.totalFreeLines}
-                totalFreeNukes={userData.totalFreeNukes}
-                onClaimSuccess={refreshAllData}
-              />
-              <FreeCreditsDisplay freeCreditSessions={userData.freeCreditSessions} />
-              <ProfileManager initialUsername={userData.username} />
-              <RewardManager
-                linesGifted={userData.linesGifted}
-                nukesGifted={userData.nukesGifted}
-                userSessions={userData.sessions}
-                onGiftSuccess={refreshAllData}
-              />
-              <PurchaseCredits onPurchaseSuccess={refreshAllData} />
-              <SessionManager initialSessions={sessions} />
-              <TransactionHistory />
-            </div>
-          </>
-        ) : (
-          <div className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-border/50 bg-white/5 py-24 text-center">
-            <h2 className="text-2xl font-bold text-white">Connect Your Wallet</h2>
-            <p className="mt-2 text-muted-foreground">Please connect your wallet to access your dashboard.</p>
-            <div className="mt-6">
-              <WalletMultiButton
-                style={{
-                  backgroundColor: "#F000B8",
-                  color: "#fff",
-                  borderRadius: "8px",
-                  fontSize: "16px",
-                  fontWeight: "600",
-                  height: "50px",
-                }}
-              />
-            </div>
-          </div>
-        )}
-      </div>
-    </main>
+    <div className="flex flex-col gap-8">
+      <RankDisplay totalEarnings={userData.unclaimedSol + userData.totalClaimedSol} />
+      <StatsCards
+        lineCredits={userData.lineCredits}
+        unclaimedSol={userData.unclaimedSol}
+        totalClaimedSol={userData.totalClaimedSol}
+        totalFreeLines={userData.totalFreeLines}
+        totalFreeNukes={userData.totalFreeNukes}
+        onClaimSuccess={refreshAllData}
+      />
+      <FreeCreditsDisplay freeCreditSessions={freeCreditSessions} />
+      <ProfileManager initialUsername={userData.username} />
+      <RewardManager
+        linesGifted={userData.linesGifted}
+        nukesGifted={userData.nukesGifted}
+        userSessions={sessions}
+        onGiftSuccess={refreshAllData}
+      />
+      <PurchaseCredits onPurchaseSuccess={refreshAllData} />
+      <SessionManager initialSessions={sessions} onSessionUpdate={refreshAllData} />
+      <TransactionHistory />
+    </div>
   )
 }
 
+// The page component itself, which wraps the content in providers and layout
 export default function DashboardPage() {
   return (
     <ErrorBoundary>
       <Header />
-      <DashboardContent />
+      <main className="flex-1">
+        <div className="container py-8">
+          <h1 className="mb-6 text-3xl font-bold tracking-tighter text-white">Dashboard</h1>
+          <DashboardContent />
+        </div>
+      </main>
     </ErrorBoundary>
   )
 }

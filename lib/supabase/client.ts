@@ -9,7 +9,7 @@ let client: SupabaseClient | undefined
  * This prevents the "Multiple GoTrueClient instances" warning by ensuring
  * that the client is initialized only once per browser session.
  */
-export function createSupabaseBrowserClient() {
+function getSupabaseBrowserClient() {
   // If we're on the server, always create a new instance
   if (typeof window === "undefined") {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
@@ -46,3 +46,7 @@ export function createSupabaseBrowserClient() {
 
   return client
 }
+
+// Export under both names to ensure compatibility with all existing imports.
+export { getSupabaseBrowserClient }
+export const createSupabaseBrowserClient = getSupabaseBrowserClient

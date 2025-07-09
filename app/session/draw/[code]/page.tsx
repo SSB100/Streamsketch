@@ -10,7 +10,7 @@ import { BrushSizePicker } from "@/components/whiteboard/brush-size-picker"
 import { PurchaseCredits } from "@/components/dashboard/purchase-credits"
 import { NukeSelectionDialog } from "@/components/whiteboard/nuke-selection-dialog"
 import { NukeAnimationOverlay } from "@/components/whiteboard/nuke-animation-overlay"
-import { useRealtimeChannel } from "@/hooks/use-realtime-channel"
+import { useRealtimeChannel, type ConnectionStatus } from "@/hooks/use-realtime-channel"
 import {
   getSessionData,
   getUserData,
@@ -50,13 +50,12 @@ function DrawPageContent({ params }: { params: { code: string } }) {
   const [nukeEvent, setNukeEvent] = useState<{ username: string | null; animationId: string } | null>(null)
   const [color, setColor] = useState("#FFFFFF")
   const [brushSize, setBrushSize] = useState(5)
-  const [connectionStatus, setConnectionStatus] = useState<"connected" | "disconnected" | "reconnecting">("connected")
 
   const canvasRef = useRef<CanvasHandle>(null)
   const lastNukeTimestampRef = useRef<number>(0)
   const drawStartTimeRef = useRef<number>(0)
-  const isInitialSubscription = useRef(true)
   const lineDrawTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const previousConnectionStatus = useRef<ConnectionStatus>("connected")
 
   // Track pending optimistic drawings
   const pendingDrawingsRef = useRef<
@@ -115,6 +114,15 @@ function DrawPageContent({ params }: { params: { code: string } }) {
     [],
   )
 
+  const channelOptions = useMemo(
+    () => ({
+      onNukeBroadcast: handleIncomingNuke,
+      onDrawBroadcast: handleIncomingDraw,
+    }),
+    [handleIncomingNuke, handleIncomingDraw],
+  )
+  const { connectionStatus } = useRealtimeChannel(session?.id ?? null, channelOptions)
+
   const refreshUserData = useCallback(async () => {
     if (!publicKey || !session) return
     try {
@@ -152,43 +160,7 @@ function DrawPageContent({ params }: { params: { code: string } }) {
     }
   }, [session, params.code])
 
-  const handleSubscription = useCallback(() => {
-    if (isInitialSubscription.current) {
-      isInitialSubscription.current = false
-      setConnectionStatus("connected")
-      return
-    }
-    console.log("[Realtime] Reconnected. Syncing canvas and user data...")
-    setConnectionStatus("connected")
-    toast.success("Reconnected to server!")
-    refreshUserData()
-    syncCanvasState()
-  }, [refreshUserData, syncCanvasState])
-
-  // Simulate connection status tracking (in a real app, you'd get this from Supabase)
-  useEffect(() => {
-    const handleOnline = () => setConnectionStatus("connected")
-    const handleOffline = () => setConnectionStatus("disconnected")
-
-    window.addEventListener("online", handleOnline)
-    window.addEventListener("offline", handleOffline)
-
-    return () => {
-      window.removeEventListener("online", handleOnline)
-      window.removeEventListener("offline", handleOffline)
-    }
-  }, [])
-
-  const channelOptions = useMemo(
-    () => ({
-      onNukeBroadcast: handleIncomingNuke,
-      onDrawBroadcast: handleIncomingDraw,
-      onSubscribed: handleSubscription,
-    }),
-    [handleIncomingNuke, handleIncomingDraw, handleSubscription],
-  )
-  useRealtimeChannel(session?.id ?? null, channelOptions)
-
+  // Effect to handle initial data load
   useEffect(() => {
     const bootstrap = async () => {
       setIsLoading(true)
@@ -211,11 +183,23 @@ function DrawPageContent({ params }: { params: { code: string } }) {
     bootstrap()
   }, [params.code])
 
+  // Effect to refresh user data when session or public key changes
   useEffect(() => {
     if (session && publicKey) {
       refreshUserData()
     }
   }, [session, publicKey, refreshUserData])
+
+  // Effect to handle re-syncing after a reconnection
+  useEffect(() => {
+    if (previousConnectionStatus.current !== "connected" && connectionStatus === "connected") {
+      console.log("[DrawPage] Reconnected. Syncing canvas and user data...")
+      toast.info("Reconnected! Syncing data...")
+      refreshUserData()
+      syncCanvasState()
+    }
+    previousConnectionStatus.current = connectionStatus
+  }, [connectionStatus, refreshUserData, syncCanvasState])
 
   const handleDrawStart = () => {
     if (!publicKey) {
@@ -228,19 +212,16 @@ function DrawPageContent({ params }: { params: { code: string } }) {
     }
     drawStartTimeRef.current = Date.now()
 
-    // Clear any existing timer to prevent issues if a new draw starts quickly
     if (lineDrawTimerRef.current) {
       clearTimeout(lineDrawTimerRef.current)
     }
 
-    // Set a timer to stop drawing after 5 seconds
     lineDrawTimerRef.current = setTimeout(() => {
       if (canvasRef.current) {
         canvasRef.current.forceStopDrawing()
-        // Clear the timer ref since we've just used it
         lineDrawTimerRef.current = null
       }
-    }, 5000) // 5 seconds
+    }, 5000)
 
     return true
   }
@@ -251,15 +232,13 @@ function DrawPageContent({ params }: { params: { code: string } }) {
       if (!pending || !session || !publicKey) return
 
       if (pending.retryCount >= 3) {
-        // Max retries reached - remove optimistic drawing and show error
         canvasRef.current?.removeOptimisticDrawing(tempId)
         pendingDrawingsRef.current.delete(tempId)
         toast.error("Failed to save drawing after multiple attempts. Please check your connection.")
-        await refreshUserData() // Refresh credits since the drawing failed
+        await refreshUserData()
         return
       }
 
-      // Retry the drawing
       const retryPromise = recordDrawingAction(publicKey.toBase58(), session.id, pending.drawing.drawing_data)
 
       pendingDrawingsRef.current.set(tempId, {
@@ -271,11 +250,9 @@ function DrawPageContent({ params }: { params: { code: string } }) {
       try {
         const result = await retryPromise
         if (!result.success) {
-          // Schedule another retry
           setTimeout(() => retryFailedDrawing(tempId), 2000 * pending.retryCount)
         }
       } catch (err) {
-        // Schedule another retry
         setTimeout(() => retryFailedDrawing(tempId), 2000 * pending.retryCount)
       }
     },
@@ -283,7 +260,6 @@ function DrawPageContent({ params }: { params: { code: string } }) {
   )
 
   const handleDrawEnd = async (line: Omit<Drawing["drawing_data"], "drawer_wallet_address">) => {
-    // Clear the timer when drawing ends (either naturally or forced)
     if (lineDrawTimerRef.current) {
       clearTimeout(lineDrawTimerRef.current)
       lineDrawTimerRef.current = null
@@ -291,18 +267,15 @@ function DrawPageContent({ params }: { params: { code: string } }) {
 
     if (!publicKey || !session) return
 
-    // Prevent sending a drawing that was started before the last nuke
     if (drawStartTimeRef.current < lastNukeTimestampRef.current) {
       toast.info("The board was cleared while you were drawing. Your line was not saved.")
       return
     }
 
-    // Only process if we have at least 2 points (a valid line)
     if (!line.points || line.points.length < 2) {
       return
     }
 
-    // Create optimistic drawing with temporary ID
     const tempId = nextTempIdRef.current++
     const optimisticDrawing: Drawing = {
       id: tempId,
@@ -311,16 +284,11 @@ function DrawPageContent({ params }: { params: { code: string } }) {
       created_at: new Date().toISOString(),
     }
 
-    // Immediately show the drawing optimistically
     canvasRef.current?.addOptimisticDrawing(optimisticDrawing)
-
-    // Optimistically update credits
     setCredits((p) => (p.freeLines > 0 ? { ...p, freeLines: p.freeLines - 1 } : { ...p, paidLines: p.paidLines - 1 }))
 
-    // Start the server request
     const serverPromise = recordDrawingAction(publicKey.toBase58(), session.id, line)
 
-    // Track this pending drawing
     pendingDrawingsRef.current.set(tempId, {
       drawing: optimisticDrawing,
       promise: serverPromise,
@@ -330,14 +298,11 @@ function DrawPageContent({ params }: { params: { code: string } }) {
     try {
       const result = await serverPromise
       if (!result.success) {
-        // Server rejected the drawing - start retry logic
         console.warn("Drawing rejected by server, starting retry:", result.error)
         setTimeout(() => retryFailedDrawing(tempId), 1000)
       }
-      // If successful, the drawing will be confirmed via real-time broadcast
     } catch (error) {
       console.error("Drawing request failed:", error)
-      // Start retry logic
       setTimeout(() => retryFailedDrawing(tempId), 1000)
     }
   }

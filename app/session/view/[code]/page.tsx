@@ -4,7 +4,7 @@ import { useEffect, useState, useRef, useCallback, useMemo } from "react"
 import type { Drawing } from "@/lib/types"
 import { Canvas, type CanvasHandle } from "@/components/whiteboard/canvas"
 import { NukeAnimationOverlay } from "@/components/whiteboard/nuke-animation-overlay"
-import { useRealtimeChannel } from "@/hooks/use-realtime-channel"
+import { useRealtimeChannel, type ConnectionStatus } from "@/hooks/use-realtime-channel"
 import { getSessionData } from "@/app/actions"
 import { Copy, Eye, Maximize, Minimize, RefreshCw, Loader2, Wifi, WifiOff } from "lucide-react"
 import { toast } from "sonner"
@@ -16,19 +16,17 @@ export default function ViewPage({ params }: { params: { code: string } }) {
   const [isLoading, setIsLoading] = useState(true)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [nukeEvent, setNukeEvent] = useState<{ username: string | null; animationId: string } | null>(null)
-  const [connectionStatus, setConnectionStatus] = useState<"connected" | "disconnected" | "reconnecting">("connected")
 
   const canvasRef = useRef<CanvasHandle>(null)
   const fullscreenContainerRef = useRef<HTMLDivElement>(null)
   const lastNukeTimestampRef = useRef<number>(0)
-  const isInitialSubscription = useRef(true)
+  const previousConnectionStatus = useRef<ConnectionStatus>("connected")
 
   const drawUrl = `https://streamsketch.tech/session/draw/${params.code}`
 
   // --- Realtime Channel Handlers ---
   const handleIncomingDraw = useCallback(({ drawing }: { drawing: Drawing }) => {
     if (new Date(drawing.created_at).getTime() < lastNukeTimestampRef.current) {
-      console.log("[Realtime] Ignored stale drawing from before last nuke.")
       return
     }
     setDrawings((prev) => {
@@ -57,14 +55,24 @@ export default function ViewPage({ params }: { params: { code: string } }) {
     [],
   )
 
+  const channelOptions = useMemo(
+    () => ({
+      onNukeBroadcast: handleIncomingNuke,
+      onDrawBroadcast: handleIncomingDraw,
+    }),
+    [handleIncomingNuke, handleIncomingDraw],
+  )
+
+  const { connectionStatus } = useRealtimeChannel(session?.id ?? null, channelOptions)
+
   // --- Manual Sync & Initial Load ---
   const refreshAllDrawings = useCallback(async () => {
     if (!session) return
     setIsLoading(true)
     try {
       const { drawings: serverDrawings } = await getSessionData(params.code)
-      setDrawings([])
-      setDrawings(serverDrawings)
+      setDrawings([]) // Clear local state
+      setDrawings(serverDrawings) // Populate with fresh server state
       toast.success("Canvas synced successfully!")
     } catch (err) {
       console.error("Failed to refresh drawings:", err)
@@ -74,40 +82,7 @@ export default function ViewPage({ params }: { params: { code: string } }) {
     }
   }, [session, params.code])
 
-  const handleSubscription = useCallback(() => {
-    if (isInitialSubscription.current) {
-      isInitialSubscription.current = false
-      console.log("[Realtime] Initial subscription successful. Performing sync to ensure data consistency.")
-    } else {
-      console.log("[Realtime] Reconnected. Syncing canvas state...")
-      toast.info("Reconnected! Syncing canvas...")
-    }
-    setConnectionStatus("connected")
-    refreshAllDrawings()
-  }, [refreshAllDrawings])
-
-  useEffect(() => {
-    const handleOnline = () => setConnectionStatus("connected")
-    const handleOffline = () => setConnectionStatus("disconnected")
-    window.addEventListener("online", handleOnline)
-    window.addEventListener("offline", handleOffline)
-    return () => {
-      window.removeEventListener("online", handleOnline)
-      window.removeEventListener("offline", handleOffline)
-    }
-  }, [])
-
-  const channelOptions = useMemo(
-    () => ({
-      onNukeBroadcast: handleIncomingNuke,
-      onDrawBroadcast: handleIncomingDraw,
-      onSubscribed: handleSubscription,
-    }),
-    [handleIncomingNuke, handleIncomingDraw, handleSubscription],
-  )
-
-  useRealtimeChannel(session?.id ?? null, channelOptions)
-
+  // Effect to handle initial data load
   useEffect(() => {
     const fetchInitialData = async () => {
       setIsLoading(true)
@@ -128,6 +103,16 @@ export default function ViewPage({ params }: { params: { code: string } }) {
     }
     fetchInitialData()
   }, [params.code])
+
+  // Effect to handle re-syncing after a reconnection
+  useEffect(() => {
+    if (previousConnectionStatus.current !== "connected" && connectionStatus === "connected") {
+      console.log("[ViewPage] Reconnected. Syncing canvas state...")
+      toast.info("Reconnected! Syncing canvas...")
+      refreshAllDrawings()
+    }
+    previousConnectionStatus.current = connectionStatus
+  }, [connectionStatus, refreshAllDrawings])
 
   // --- Fullscreen Logic ---
   const toggleFullscreen = () => {
