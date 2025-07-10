@@ -41,7 +41,6 @@
     "@solana/wallet-adapter-base": "latest",
     "@solana/wallet-adapter-react": "latest",
     "@solana/wallet-adapter-react-ui": "latest",
-    "@solana/wallet-adapter-wallets": "latest",
     "@solana/web3.js": "latest",
     "@stripe/react-stripe-js": "latest",
     "@stripe/stripe-js": "latest",

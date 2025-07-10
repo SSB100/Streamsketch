@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useActionState } from "react"
 import { useWallet } from "@solana/wallet-adapter-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -18,6 +18,13 @@ interface StatsCardsProps {
   onClaimSuccess?: () => void
 }
 
+const initialState = {
+  success: false,
+  message: "",
+  signature: "",
+  error: "",
+}
+
 export function StatsCards({
   lineCredits,
   unclaimedSol,
@@ -27,33 +34,25 @@ export function StatsCards({
   onClaimSuccess,
 }: StatsCardsProps) {
   const { publicKey } = useWallet()
-  const [isClaiming, setIsClaiming] = useState(false)
+  const [state, formAction, isPending] = useActionState(claimRevenueAction, initialState)
 
-  const handleClaim = async () => {
-    if (!publicKey || unclaimedSol <= 0) return
-    setIsClaiming(true)
-    try {
-      const result = await claimRevenueAction(publicKey.toBase58())
-      if (result.success) {
-        toast.success("Claim Successful!", {
-          description: result.message,
-          action: result.signature
-            ? {
-                label: "View on Solscan",
-                onClick: () => window.open(`https://solscan.io/tx/${result.signature}?cluster=devnet`, "_blank"),
-              }
-            : undefined,
-        })
-        onClaimSuccess?.()
-      } else {
-        toast.error("Claim Failed", { description: result.error })
-      }
-    } catch (error: any) {
-      toast.error("An unexpected error occurred", { description: error.message })
-    } finally {
-      setIsClaiming(false)
+  useEffect(() => {
+    if (state.error) {
+      toast.error("Claim Failed", { description: state.error })
     }
-  }
+    if (state.success && state.message) {
+      toast.success("Claim Successful!", {
+        description: state.message,
+        action: state.signature
+          ? {
+              label: "View on Solscan",
+              onClick: () => window.open(`https://solscan.io/tx/${state.signature}?cluster=devnet`, "_blank"),
+            }
+          : undefined,
+      })
+      onClaimSuccess?.()
+    }
+  }, [state, onClaimSuccess])
 
   return (
     <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
@@ -94,15 +93,19 @@ export function StatsCards({
         </CardHeader>
         <CardContent>
           <div className="text-2xl font-bold text-white">{formatSol(unclaimedSol)} SOL</div>
-          <Button
-            size="sm"
-            className="mt-2 w-full bg-yellow-400 text-black hover:bg-yellow-400/90"
-            disabled={isClaiming || unclaimedSol <= 0}
-            onClick={handleClaim}
-          >
-            {isClaiming ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-            Claim Revenue
-          </Button>
+          <form action={formAction}>
+            <input type="hidden" name="streamer_wallet" value={publicKey?.toBase58() || ""} />
+            <input type="hidden" name="claim_amount" value={unclaimedSol} />
+            <Button
+              type="submit"
+              size="sm"
+              className="mt-2 w-full bg-yellow-400 text-black hover:bg-yellow-400/90"
+              disabled={isPending || !publicKey || unclaimedSol <= 0}
+            >
+              {isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Claim Revenue
+            </Button>
+          </form>
         </CardContent>
       </Card>
       <Card className="border-green-400/20 bg-white/5">

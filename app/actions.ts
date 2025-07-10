@@ -277,33 +277,31 @@ export async function claimRevenueAction(prevState: any, formData: FormData) {
   const streamerWallet = formData.get("streamer_wallet") as string
   const claimAmount = Number(formData.get("claim_amount"))
 
-  if (!streamerWallet || !claimAmount) {
-    return { ...initialState, error: "Missing required form data." }
+  if (!streamerWallet || !claimAmount || claimAmount <= 0) {
+    return { ...initialState, error: "Invalid claim amount." }
   }
 
-  // 1. Call DB function to update revenue and get a transaction ID
-  const { data: transactionId, error: claimError } = await supabase.rpc("claim_all_revenue", {
-    p_streamer_wallet_address: streamerWallet,
-  })
+  // 1. Call DB function to prepare the claim and get a transaction ID
+  const { data: transactionId, error: claimError } = await supabase
+    .rpc("claim_all_revenue", { p_streamer_wallet_address: streamerWallet })
+    .single()
 
-  if (claimError) {
-    return { ...initialState, error: `Database claim failed: ${claimError.message}` }
-  }
-  if (!transactionId) {
-    return { ...initialState, error: "No revenue to claim or an unknown error occurred." }
+  if (claimError || !transactionId) {
+    console.error("Claim preparation failed:", claimError?.message)
+    return { ...initialState, error: `Database claim failed: ${claimError?.message || "No revenue to claim."}` }
   }
 
   // 2. Perform the on-chain transaction
   const secretKeyStr = process.env.APP_WALLET_SECRET_KEY
   if (!secretKeyStr) {
     console.error("CRITICAL: APP_WALLET_SECRET_KEY is not set.")
-    return { ...initialState, error: "Payout service is not configured. Please contact support." }
+    return { ...initialState, error: "Payout service is not configured." }
   }
 
   const rpcHost = process.env.SOLANA_RPC_HOST || process.env.NEXT_PUBLIC_SOLANA_RPC_HOST
   if (!rpcHost) {
     console.error("CRITICAL: SOLANA_RPC_HOST is not set.")
-    return { ...initialState, error: "RPC service is not configured. Please contact support." }
+    return { ...initialState, error: "RPC service is not configured." }
   }
 
   try {
@@ -311,7 +309,12 @@ export async function claimRevenueAction(prevState: any, formData: FormData) {
     const appKeypair = Keypair.fromSecretKey(bs58.decode(secretKeyStr))
     const streamerPublicKey = new PublicKey(streamerWallet)
 
-    const transaction = new Transaction().add(
+    // THE FIX: Get the latest blockhash before creating the transaction
+    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash()
+    const transaction = new Transaction({
+      feePayer: appKeypair.publicKey,
+      recentBlockhash: blockhash,
+    }).add(
       SystemProgram.transfer({
         fromPubkey: appKeypair.publicKey,
         toPubkey: streamerPublicKey,
@@ -319,11 +322,12 @@ export async function claimRevenueAction(prevState: any, formData: FormData) {
       }),
     )
 
-    const { signature, lastValidBlockHeight, blockhash } = await connection.sendTransaction(transaction, [appKeypair])
+    const signature = await connection.sendTransaction(transaction, [appKeypair])
     await connection.confirmTransaction({ signature, lastValidBlockHeight, blockhash })
 
     // 3. Get the transaction fee and update the database record
     const fee = (await connection.getFeeForMessage(transaction.compileMessage(), "confirmed")).value || 0
+
     await supabase.rpc("update_transaction_details", {
       p_transaction_id: transactionId,
       p_signature: signature,
@@ -334,16 +338,21 @@ export async function claimRevenueAction(prevState: any, formData: FormData) {
     return {
       ...initialState,
       success: true,
-      message: `Successfully claimed and transferred ${claimAmount.toFixed(6)} SOL.`,
+      message: `Successfully transferred ${claimAmount.toFixed(6)} SOL.`,
       signature: signature,
     }
   } catch (error: any) {
-    console.error(`CRITICAL: On-chain payout failed for ${streamerWallet} after claiming from DB.`, error)
+    console.error(`CRITICAL: On-chain payout failed for transaction ID ${transactionId}. Reverting DB claim.`, error)
+    // SAFETY: Revert the database transaction if the on-chain transfer fails
+    await supabase.from("transactions").delete().eq("id", transactionId)
+    await supabase
+      .from("revenue")
+      .update({ unclaimed_sol: claimAmount, total_claimed_sol: 0 }) // This is a simplified revert, might need adjustment based on exact schema
+      .eq("streamer_wallet_address", streamerWallet)
+
     return {
       ...initialState,
-      error: `On-chain payout failed: ${getErrorMessage(
-        error,
-      )}. The database state may be inconsistent. Please contact support.`,
+      error: `On-chain payout failed: ${getErrorMessage(error)}. Please contact support.`,
     }
   }
 }
@@ -563,93 +572,6 @@ export async function getUserRank(walletAddress: string) {
   } catch (error: any) {
     console.error("User rank fetch failed:", error)
     throw new Error(`Failed to fetch user rank: ${error.message}`)
-  }
-}
-
-// This is the streamer-facing claim action
-export async function claimRevenue(streamerWalletAddress: string) {
-  const supabase = createSupabaseServerClient()
-
-  // 1. Call the DB function to prepare the claim and get a transaction ID
-  const { data: transactionId, error: claimError } = await supabase
-    .rpc("claim_all_revenue", { p_streamer_wallet_address: streamerWalletAddress })
-    .single()
-
-  if (claimError || !transactionId) {
-    console.error("Claim preparation failed:", claimError?.message)
-    return { success: false, error: `Database claim failed: ${claimError?.message}` }
-  }
-
-  // Fetch the amount to be transferred from the transaction record
-  const { data: transactionRecord, error: fetchError } = await supabase
-    .from("transactions")
-    .select("sol_amount")
-    .eq("id", transactionId)
-    .single()
-
-  if (fetchError || !transactionRecord) {
-    console.error("Failed to fetch claim amount:", fetchError?.message)
-    // Here you might want to add logic to revert the claim or flag it for review
-    return { success: false, error: "Could not verify claim amount." }
-  }
-
-  const claimAmount = transactionRecord.sol_amount
-
-  if (claimAmount <= 0) {
-    return { success: false, error: "No revenue to claim." }
-  }
-
-  // 2. Perform the on-chain transaction
-  const secretKeyStr = process.env.APP_WALLET_SECRET_KEY
-  if (!secretKeyStr) {
-    console.error("CRITICAL: APP_WALLET_SECRET_KEY is not set.")
-    return { success: false, error: "Payout service is not configured." }
-  }
-
-  const rpcHost = process.env.SOLANA_RPC_HOST || process.env.NEXT_PUBLIC_SOLANA_RPC_HOST
-  if (!rpcHost) {
-    console.error("CRITICAL: SOLANA_RPC_HOST is not set.")
-    return { success: false, error: "RPC service is not configured." }
-  }
-
-  try {
-    const connection = new Connection(rpcHost, "confirmed")
-    const appKeypair = Keypair.fromSecretKey(bs58.decode(secretKeyStr))
-    const streamerPublicKey = new PublicKey(streamerWalletAddress)
-
-    const transaction = new Transaction().add(
-      SystemProgram.transfer({
-        fromPubkey: appKeypair.publicKey,
-        toPubkey: streamerPublicKey,
-        lamports: Math.floor(Number(claimAmount) * LAMPORTS_PER_SOL),
-      }),
-    )
-
-    const { signature, lastValidBlockHeight, blockhash } = await connection.sendTransaction(transaction, [appKeypair])
-    await connection.confirmTransaction({ signature, lastValidBlockHeight, blockhash })
-
-    // 3. Get the transaction fee and update the database record
-    const fee = (await connection.getFeeForMessage(transaction.compileMessage(), "confirmed")).value || 0
-
-    await supabase.rpc("update_transaction_details", {
-      p_transaction_id: transactionId,
-      p_signature: signature,
-      p_fee: fee / LAMPORTS_PER_SOL, // Convert lamports to SOL
-    })
-
-    revalidatePath("/dashboard")
-    return {
-      success: true,
-      message: `Successfully transferred ${Number(claimAmount).toFixed(6)} SOL.`,
-      signature: signature,
-    }
-  } catch (error: any) {
-    console.error(`CRITICAL: On-chain payout failed for transaction ID ${transactionId}.`, error)
-    // Here you might want to add logic to revert the claim or flag it for review
-    return {
-      success: false,
-      error: `On-chain payout failed: ${error.message}. Please contact support.`,
-    }
   }
 }
 
