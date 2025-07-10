@@ -1,30 +1,35 @@
 "use client"
 
 import type React from "react"
-
 import { useState } from "react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import AdminDashboard from "@/components/admin/admin-dashboard"
 import { ShieldAlert } from "lucide-react"
-
-// In a real application, this should be an environment variable.
-// For this demo, we'll use the user's requested password.
-const ADMIN_PASSWORD = "ADHD2024!!"
+import { verifyAdminPassword } from "./actions"
 
 export default function AdminPage() {
   const [password, setPassword] = useState("")
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [error, setError] = useState("")
+  const [isVerifying, setIsVerifying] = useState(false)
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (password === ADMIN_PASSWORD) {
-      setIsAuthenticated(true)
-      setError("")
-    } else {
-      setError("Incorrect password.")
+    setError("")
+    setIsVerifying(true)
+    try {
+      const result = await verifyAdminPassword(password)
+      if (result.success) {
+        setIsAuthenticated(true)
+      } else {
+        setError("Incorrect password.")
+      }
+    } catch (err) {
+      setError("An error occurred during authentication.")
+    } finally {
+      setIsVerifying(false)
     }
   }
 
@@ -50,15 +55,19 @@ export default function AdminPage() {
               onChange={(e) => setPassword(e.target.value)}
               placeholder="Enter admin password"
               className="text-center"
+              disabled={isVerifying}
             />
             {error && <p className="text-center text-sm text-red-500">{error}</p>}
-            <Button type="submit" className="w-full bg-yellow-500 hover:bg-yellow-600 text-black">
-              Authenticate
+            <Button
+              type="submit"
+              className="w-full bg-yellow-500 hover:bg-yellow-600 text-black"
+              disabled={isVerifying}
+            >
+              {isVerifying ? "Authenticating..." : "Authenticate"}
             </Button>
           </form>
           <p className="mt-4 text-center text-xs text-gray-500">
-            <strong>Security Warning:</strong> For production, the password should be managed via environment variables,
-            not hardcoded.
+            <strong>Security Note:</strong> Authentication is handled securely on the server.
           </p>
         </CardContent>
       </Card>

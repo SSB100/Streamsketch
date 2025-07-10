@@ -14,6 +14,17 @@ const initialState = {
   error: "",
 }
 
+export async function verifyAdminPassword(password: string): Promise<{ success: boolean }> {
+  const correctPassword = process.env.ADMIN_PASSWORD
+  if (!correctPassword) {
+    console.error("CRITICAL: ADMIN_PASSWORD environment variable is not set.")
+    // Fail safely if the password isn't configured on the server.
+    return { success: false }
+  }
+  const success = password === correctPassword
+  return { success }
+}
+
 export async function getAdminDashboardData() {
   const admin = createSupabaseAdminClient()
   try {
