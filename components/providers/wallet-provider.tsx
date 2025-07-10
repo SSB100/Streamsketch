@@ -1,52 +1,37 @@
 "use client"
 
-import type React from "react"
-import { useMemo, useRef } from "react"
-import { ConnectionProvider, WalletProvider } from "@solana/wallet-adapter-react"
+import { type FC, type ReactNode, useMemo } from "react"
+import { ConnectionProvider, WalletProvider as SolanaWalletProvider } from "@solana/wallet-adapter-react"
 import { WalletAdapterNetwork } from "@solana/wallet-adapter-base"
 import { WalletModalProvider } from "@solana/wallet-adapter-react-ui"
 import { clusterApiUrl } from "@solana/web3.js"
+import { PhantomWalletAdapter, SolflareWalletAdapter } from "@solana/wallet-adapter-wallets"
 
-// Use a standard import for the CSS file at the top level.
+// Default styles that can be overridden by your app
 import "@solana/wallet-adapter-react-ui/styles.css"
 
-export function AppWalletProvider({ children }: { children: React.ReactNode }) {
+// Stripe-related imports
+import { loadStripe } from "@stripe/stripe-js"
+import { Elements } from "@stripe/react-stripe-js"
+
+// IMPORTANT: Call loadStripe outside of a component’s render to avoid
+// recreating the Stripe object on every render. This is the root of the issue.
+// Make sure to add your actual Stripe publishable key to your environment variables.
+const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || "pk_test_your_test_key")
+
+export const AppWalletProvider: FC<{ children: ReactNode }> = ({ children }) => {
+  // The network can be set to 'devnet', 'testnet', or 'mainnet-beta'.
   const network = WalletAdapterNetwork.Devnet
-  const hasRpcWarningBeenLogged = useRef(false)
-
-  const endpoint = useMemo(() => {
-    const custom = (process.env.NEXT_PUBLIC_SOLANA_RPC_HOST || "").trim()
-
-    if (custom && /^https?:\/\//i.test(custom)) {
-      return custom
-    }
-
-    // Only log the warning once to avoid spamming the console.
-    if (custom && !hasRpcWarningBeenLogged.current) {
-      console.warn(
-        "[WalletAdapter] CRITICAL: Ignoring invalid NEXT_PUBLIC_SOLANA_RPC_HOST (must start with http:// or https://). Falling back to Solana public RPC. This will cause performance issues and transaction failures.",
-      )
-      hasRpcWarningBeenLogged.current = true
-    }
-
-    return clusterApiUrl(network)
-  }, [network])
-
-  const wallets = useMemo(() => [], [])
+  const endpoint = useMemo(() => clusterApiUrl(network), [network])
+  const wallets = useMemo(() => [new PhantomWalletAdapter(), new SolflareWalletAdapter()], [network])
 
   return (
     <ConnectionProvider endpoint={endpoint}>
-      <WalletProvider
-        wallets={wallets}
-        autoConnect={true}
-        onError={(err) => {
-          if (err.name !== "WalletNotConnectedError" && err.name !== "WalletConnectionError") {
-            console.warn("[WalletAdapter]", err?.message ?? err)
-          }
-        }}
-      >
-        <WalletModalProvider>{children}</WalletModalProvider>
-      </WalletProvider>
+      <SolanaWalletProvider wallets={wallets} autoConnect>
+        <WalletModalProvider>
+          <Elements stripe={stripePromise}>{children}</Elements>
+        </WalletModalProvider>
+      </SolanaWalletProvider>
     </ConnectionProvider>
   )
 }
