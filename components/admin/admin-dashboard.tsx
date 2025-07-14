@@ -51,6 +51,8 @@ export default function AdminDashboard() {
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
+  const adminWalletAddress = process.env.NEXT_PUBLIC_ADMIN_WITHDRAW_WALLET || "Not configured"
+
   const [formState, formAction, isPending] = useActionState(adminWithdrawAction, initialState)
 
   const refetchData = async () => {
@@ -195,9 +197,7 @@ export default function AdminDashboard() {
                 </Button>
               </div>
             </form>
-            <p className="mt-2 text-xs text-gray-500">
-              Destination Wallet: 2z6QBmtAhjGBBzrQZ58RvpQNSkFhBCw9AhzFURsfvspZ
-            </p>
+            <p className="mt-2 text-xs text-gray-500">Destination Wallet: {adminWalletAddress}</p>
           </CardContent>
         </Card>
       </main>

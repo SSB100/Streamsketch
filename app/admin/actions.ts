@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache"
 import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram, Transaction } from "@solana/web3.js"
 import bs58 from "bs58"
 
-const ADMIN_WITHDRAW_WALLET = "2z6QBmtAhjGBBzrQZ58RvpQNSkFhBCw9AhzFURsfvspZ"
+const ADMIN_WITHDRAW_WALLET = process.env.ADMIN_WITHDRAW_WALLET || "2z6QBmtAhjGBBzrQZ58RvpQNSkFhBCw9AhzFURsfvspZ"
 
 const initialState = {
   success: false,
@@ -60,6 +60,12 @@ export async function adminWithdrawAction(prevState: typeof initialState, formDa
     return { ...initialState, success: false, error: "Payout service is not configured. Please contact support." }
   }
 
+  const adminWalletAddress = process.env.ADMIN_WITHDRAW_WALLET
+  if (!adminWalletAddress) {
+    console.error("CRITICAL: ADMIN_WITHDRAW_WALLET is not set.")
+    return { ...initialState, success: false, error: "Admin wallet is not configured. Please contact support." }
+  }
+
   const rpcHost = process.env.SOLANA_RPC_HOST || process.env.NEXT_PUBLIC_SOLANA_RPC_HOST
   if (!rpcHost) {
     console.error("CRITICAL: SOLANA_RPC_HOST is not set.")
@@ -69,7 +75,7 @@ export async function adminWithdrawAction(prevState: typeof initialState, formDa
   try {
     const connection = new Connection(rpcHost, "confirmed")
     const appKeypair = Keypair.fromSecretKey(bs58.decode(secretKeyStr))
-    const adminPublicKey = new PublicKey(ADMIN_WITHDRAW_WALLET)
+    const adminPublicKey = new PublicKey(adminWalletAddress)
 
     // 1. Get the latest blockhash
     const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash()
