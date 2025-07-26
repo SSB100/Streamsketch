@@ -73,16 +73,16 @@ export function RewardManager({ linesGifted, nukesGifted, userSessions, onGiftSu
             <CardTitle className="text-white">Reward Viewers</CardTitle>
             <CardDescription>
               Gift free lines and nukes to your community for specific sessions. Credits are tied to the session and
-              will be deleted if the session is removed.
+              will be deleted if the session is removed. No limits - gift as many as you want!
             </CardDescription>
           </div>
           <div className="flex-shrink-0 text-right text-sm">
             <p className="text-muted-foreground">Weekly Gifts Sent</p>
             <p className="font-mono text-white">
-              {linesGifted} / 100 <span className="text-muted-foreground">Lines</span>
+              {linesGifted} <span className="text-muted-foreground">Lines</span>
             </p>
             <p className="font-mono text-white">
-              {nukesGifted} / 10 <span className="text-muted-foreground">Nukes</span>
+              {nukesGifted} <span className="text-muted-foreground">Nukes</span>
             </p>
           </div>
         </div>
@@ -133,7 +133,6 @@ export function RewardManager({ linesGifted, nukesGifted, userSessions, onGiftSu
                 value={lines || ""}
                 onChange={(e) => setLines(Number.parseInt(e.target.value, 10) || 0)}
                 min="0"
-                max="100"
               />
             </div>
             <div className="grid w-full items-center gap-1.5">
@@ -147,7 +146,6 @@ export function RewardManager({ linesGifted, nukesGifted, userSessions, onGiftSu
                 value={nukes || ""}
                 onChange={(e) => setNukes(Number.parseInt(e.target.value, 10) || 0)}
                 min="0"
-                max="10"
               />
             </div>
             <div className="flex items-end">
