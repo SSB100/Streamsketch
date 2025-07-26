@@ -100,9 +100,11 @@ export async function getUserData(walletAddress: string) {
       console.error("[StreamSketch] Error getting user data:", userError?.message || "(unknown)")
       throw new Error(userError?.message || "Failed to fetch user data")
     }
+
+    // FIXED: Use correct column names
     const { data: revenueData, error: revenueError } = await admin
       .from("revenue")
-      .select("unclaimed_sol, total_claimed_sol")
+      .select("unclaimed_sol, total_claimed")
       .eq("streamer_wallet_address", walletAddress)
       .single()
     if (revenueError && revenueError.code !== "PGRST116") {
@@ -127,7 +129,7 @@ export async function getUserData(walletAddress: string) {
     return {
       lineCredits: (userData.line_credits_standard || 0) + (userData.line_credits_discounted || 0),
       unclaimedSol: revenueData?.unclaimed_sol ?? 0,
-      totalClaimedSol: revenueData?.total_claimed_sol ?? 0,
+      totalClaimedSol: revenueData?.total_claimed ?? 0, // FIXED: Use total_claimed instead of total_claimed_sol
       username: userData.username ?? null,
       linesGifted: giftingData.lines_gifted,
       nukesGifted: giftingData.nukes_gifted,
@@ -373,7 +375,7 @@ export async function claimRevenueAction(prevState: any, formData: FormData) {
     await supabase.from("transactions").delete().eq("id", transactionId)
     await supabase
       .from("revenue")
-      .update({ unclaimed_sol: claimAmount, total_claimed_sol: 0 }) // This is a simplified revert, might need adjustment based on exact schema
+      .update({ unclaimed_sol: claimAmount, total_claimed: 0 }) // This is a simplified revert, might need adjustment based on exact schema
       .eq("streamer_wallet_address", streamerWallet)
 
     return {

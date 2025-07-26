@@ -9,7 +9,6 @@ import { PurchaseCredits } from "@/components/dashboard/purchase-credits"
 import { SessionManager } from "@/components/dashboard/session-manager"
 import { TransactionHistory } from "@/components/dashboard/transaction-history"
 import { ProfileManager } from "@/components/dashboard/profile-manager"
-import { AdvertisementTile } from "@/components/dashboard/advertisement-tile"
 import { getUserData, getUserSessions, getUserFreeCreditSessions } from "@/app/actions"
 import { Skeleton } from "@/components/ui/skeleton"
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui"
@@ -56,12 +55,11 @@ function DashboardSkeleton() {
         <Skeleton className="h-[125px] w-full" />
         <Skeleton className="h-[125px] w-full" />
       </div>
-      <Skeleton className="h-[160px] w-full" /> {/* Free Credits Display */}
+      <Skeleton className="h-[160px] w-full" /> {/* Placeholder for Free Credits Display */}
       <Skeleton className="h-[120px] w-full" /> {/* Profile Manager */}
       <Skeleton className="h-[280px] w-full" /> {/* Reward Manager */}
       <Skeleton className="h-[300px] w-full" /> {/* Purchase Credits */}
       <Skeleton className="h-[400px] w-full" /> {/* Session Manager */}
-      <Skeleton className="h-[200px] w-full" /> {/* Advertisement Tile */}
       <Skeleton className="h-[400px] w-full" /> {/* Transaction History */}
     </div>
   )
@@ -185,7 +183,7 @@ function DashboardContent() {
     )
   }
 
-  // Render the full dashboard - moved AdvertisementTile below SessionManager
+  // Render the full dashboard
   return (
     <div className="flex flex-col gap-8">
       <RankDisplay totalEarnings={userData.unclaimedSol + userData.totalClaimedSol} />
@@ -207,7 +205,6 @@ function DashboardContent() {
       />
       <PurchaseCredits onPurchaseSuccess={refreshAllData} />
       <SessionManager initialSessions={sessions} onSessionUpdate={refreshAllData} />
-      <AdvertisementTile />
       <TransactionHistory />
     </div>
   )
