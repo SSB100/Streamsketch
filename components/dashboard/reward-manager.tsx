@@ -1,162 +1,201 @@
 "use client"
 
-import type React from "react"
-
 import { useState } from "react"
-import { useWallet } from "@solana/wallet-adapter-react"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
+import { Separator } from "@/components/ui/separator"
+import { Gift, Paintbrush, Bomb, Users } from "lucide-react"
 import { toast } from "sonner"
 import { giftCreditsToSessionAction } from "@/app/actions"
-import { Loader2, Gift } from "lucide-react"
+
+interface Session {
+  id: string
+  short_code: string
+  is_active: boolean
+  created_at: string
+}
 
 interface RewardManagerProps {
   linesGifted: number
   nukesGifted: number
-  userSessions: Array<{ id: string; short_code: string }>
-  onGiftSuccess?: () => void // Add callback prop
+  userSessions: Session[]
+  onGiftSuccess: () => void
 }
 
 export function RewardManager({ linesGifted, nukesGifted, userSessions, onGiftSuccess }: RewardManagerProps) {
-  const { publicKey } = useWallet()
+  const [selectedSession, setSelectedSession] = useState<string>("")
   const [viewerWallet, setViewerWallet] = useState("")
-  const [selectedSessionId, setSelectedSessionId] = useState("")
-  const [lines, setLines] = useState(0)
-  const [nukes, setNukes] = useState(0)
-  const [isLoading, setIsLoading] = useState(false)
+  const [linesToGift, setLinesToGift] = useState(1)
+  const [nukesToGift, setNukesToGift] = useState(0)
+  const [isGifting, setIsGifting] = useState(false)
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!publicKey) {
-      toast.error("Wallet not connected.")
+  const handleGiftCredits = async () => {
+    if (!selectedSession || !viewerWallet.trim()) {
+      toast.error("Please select a session and enter a viewer wallet address")
       return
     }
-    if (!selectedSessionId) {
-      toast.error("Please select a session.")
+
+    if (linesToGift <= 0 && nukesToGift <= 0) {
+      toast.error("Please specify at least one credit to gift")
       return
     }
-    setIsLoading(true)
+
+    setIsGifting(true)
     try {
       const result = await giftCreditsToSessionAction(
-        publicKey.toBase58(),
-        selectedSessionId,
-        viewerWallet,
-        lines,
-        nukes,
+        "", // Owner wallet will be determined from session
+        Number.parseInt(selectedSession),
+        viewerWallet.trim(),
+        linesToGift,
+        nukesToGift,
       )
+
       if (result.success) {
         toast.success(result.message || "Credits gifted successfully!")
         setViewerWallet("")
-        setSelectedSessionId("")
-        setLines(0)
-        setNukes(0)
-        // Call the callback to refresh dashboard data
-        onGiftSuccess?.()
+        setLinesToGift(1)
+        setNukesToGift(0)
+        onGiftSuccess()
       } else {
-        toast.error("Failed to gift credits", { description: result.error })
+        toast.error(result.error || "Failed to gift credits")
       }
-    } catch (error: any) {
-      toast.error("An unexpected error occurred", { description: error.message })
+    } catch (error) {
+      console.error("Gift credits error:", error)
+      toast.error("An unexpected error occurred")
     } finally {
-      setIsLoading(false)
+      setIsGifting(false)
     }
   }
 
+  const activeSessions = userSessions.filter((session) => session.is_active)
+
   return (
-    <Card className="border-border/20 bg-white/5">
-      <CardHeader>
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <CardTitle className="text-white">Reward Viewers</CardTitle>
-            <CardDescription>
-              Gift free lines and nukes to your community for specific sessions. Credits are tied to the session and
-              will be deleted if the session is removed. No limits - gift as many as you want!
-            </CardDescription>
-          </div>
-          <div className="flex-shrink-0 text-right text-sm">
-            <p className="text-muted-foreground">Weekly Gifts Sent</p>
-            <p className="font-mono text-white">
-              {linesGifted} <span className="text-muted-foreground">Lines</span>
-            </p>
-            <p className="font-mono text-white">
-              {nukesGifted} <span className="text-muted-foreground">Nukes</span>
-            </p>
-          </div>
-        </div>
-      </CardHeader>
-      <CardContent>
-        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <div className="grid items-center gap-1.5">
-              <Label htmlFor="viewerWallet" className="text-white">
-                Viewer's Wallet Address
-              </Label>
-              <Input
-                id="viewerWallet"
-                type="text"
-                placeholder="Enter viewer's Solana wallet address"
-                value={viewerWallet}
-                onChange={(e) => setViewerWallet(e.target.value)}
-                required
-              />
+    <div className="space-y-6">
+      {/* Statistics */}
+      <div className="grid grid-cols-2 gap-4">
+        <Card className="border-border/20 bg-deep-space/50">
+          <CardContent className="flex items-center justify-between p-3">
+            <div className="flex items-center space-x-2 min-w-0">
+              <Paintbrush className="h-4 w-4 text-blue-400 shrink-0" />
+              <span className="text-sm text-muted-foreground truncate">Lines Gifted</span>
             </div>
-            <div className="grid items-center gap-1.5">
-              <Label htmlFor="session" className="text-white">
-                Session
-              </Label>
-              <Select value={selectedSessionId} onValueChange={setSelectedSessionId} required>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select a session" />
-                </SelectTrigger>
-                <SelectContent>
-                  {userSessions.map((session) => (
-                    <SelectItem key={session.id} value={session.id}>
-                      {session.short_code}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            <Badge variant="secondary" className="bg-blue-500/10 text-blue-400 border-blue-500/20 shrink-0">
+              {linesGifted}
+            </Badge>
+          </CardContent>
+        </Card>
+        <Card className="border-border/20 bg-deep-space/50">
+          <CardContent className="flex items-center justify-between p-3">
+            <div className="flex items-center space-x-2 min-w-0">
+              <Bomb className="h-4 w-4 text-red-400 shrink-0" />
+              <span className="text-sm text-muted-foreground truncate">Nukes Gifted</span>
             </div>
-          </div>
-          <div className="flex gap-4">
-            <div className="grid w-full items-center gap-1.5">
-              <Label htmlFor="lines" className="text-white">
-                Lines
-              </Label>
-              <Input
-                id="lines"
-                type="number"
-                placeholder="0"
-                value={lines || ""}
-                onChange={(e) => setLines(Number.parseInt(e.target.value, 10) || 0)}
-                min="0"
-              />
+            <Badge variant="secondary" className="bg-red-500/10 text-red-400 border-red-500/20 shrink-0">
+              {nukesGifted}
+            </Badge>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Separator />
+
+      {/* Gift Form */}
+      <Card className="border-border/20 bg-deep-space/50">
+        <CardHeader className="pb-4">
+          <CardTitle className="flex items-center gap-2 text-white">
+            <Gift className="h-5 w-5 text-neon-pink shrink-0" />
+            <span className="truncate">Gift Credits to Viewer</span>
+          </CardTitle>
+          <CardDescription className="text-sm">Send free credits to any viewer on your active sessions</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4 pt-0">
+          {activeSessions.length === 0 ? (
+            <div className="text-center py-6">
+              <Users className="mx-auto h-10 w-10 text-muted-foreground mb-3" />
+              <p className="text-muted-foreground font-medium">No active sessions available</p>
+              <p className="text-sm text-muted-foreground mt-1">
+                Create and activate a session to start gifting credits
+              </p>
             </div>
-            <div className="grid w-full items-center gap-1.5">
-              <Label htmlFor="nukes" className="text-white">
-                Nukes
-              </Label>
-              <Input
-                id="nukes"
-                type="number"
-                placeholder="0"
-                value={nukes || ""}
-                onChange={(e) => setNukes(Number.parseInt(e.target.value, 10) || 0)}
-                min="0"
-              />
-            </div>
-            <div className="flex items-end">
-              <Button type="submit" disabled={isLoading || !publicKey || (!lines && !nukes) || !selectedSessionId}>
-                {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Gift className="mr-2 h-4 w-4" />}
-                Gift Credits
+          ) : (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="session-select" className="text-sm font-medium text-white">
+                  Select Session
+                </Label>
+                <Select value={selectedSession} onValueChange={setSelectedSession}>
+                  <SelectTrigger className="bg-deep-space/70 border-border/40 text-white">
+                    <SelectValue placeholder="Choose an active session" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-deep-space border-border/40">
+                    {activeSessions.map((session) => (
+                      <SelectItem key={session.id} value={session.id} className="text-white hover:bg-deep-space/70">
+                        {session.short_code}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="viewer-wallet" className="text-sm font-medium text-white">
+                  Viewer Wallet Address
+                </Label>
+                <Input
+                  id="viewer-wallet"
+                  placeholder="Enter viewer's wallet address"
+                  value={viewerWallet}
+                  onChange={(e) => setViewerWallet(e.target.value)}
+                  className="bg-deep-space/70 border-border/40 text-white placeholder:text-gray-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <Label htmlFor="lines-to-gift" className="text-sm font-medium text-white">
+                    Line Credits
+                  </Label>
+                  <Input
+                    id="lines-to-gift"
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={linesToGift}
+                    onChange={(e) => setLinesToGift(Number.parseInt(e.target.value) || 0)}
+                    className="bg-deep-space/70 border-border/40 text-white"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="nukes-to-gift" className="text-sm font-medium text-white">
+                    Nuke Credits
+                  </Label>
+                  <Input
+                    id="nukes-to-gift"
+                    type="number"
+                    min="0"
+                    max="10"
+                    value={nukesToGift}
+                    onChange={(e) => setNukesToGift(Number.parseInt(e.target.value) || 0)}
+                    className="bg-deep-space/70 border-border/40 text-white"
+                  />
+                </div>
+              </div>
+
+              <Button
+                onClick={handleGiftCredits}
+                disabled={isGifting || !selectedSession || !viewerWallet.trim()}
+                className="w-full bg-neon-pink hover:bg-neon-pink/90 text-white font-semibold transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isGifting ? "Gifting..." : "Gift Credits"}
               </Button>
             </div>
-          </div>
-        </form>
-      </CardContent>
-    </Card>
+          )}
+        </CardContent>
+      </Card>
+    </div>
   )
 }
