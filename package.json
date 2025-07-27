@@ -46,6 +46,7 @@
     "@stripe/stripe-js": "latest",
     "@supabase/ssr": "latest",
     "@supabase/supabase-js": "latest",
+    "@vercel/blob": "latest",
     "autoprefixer": "^10.4.20",
     "bs58": "latest",
     "class-variance-authority": "^0.7.1",

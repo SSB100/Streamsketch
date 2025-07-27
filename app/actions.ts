@@ -1,14 +1,15 @@
 "use server"
-
-import { createSupabaseAdminClient, createSupabaseServerClient } from "@/lib/supabase/admin"
+import { createSupabaseAdminClient } from "@/lib/supabase/admin"
+import { createSupabaseServerClient } from "@/lib/supabase/server"
 import { revalidatePath } from "next/cache"
-import type { Drawing } from "@/lib/types"
+import type { Drawing, Advertisement } from "@/lib/types"
 import { STREAMER_REVENUE_SHARE, APP_WALLET_ADDRESS } from "@/lib/constants"
 import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram, Transaction } from "@solana/web3.js"
 import bs58 from "bs58"
 import type { NukeAnimation } from "@/lib/nuke-animations"
 import { PURCHASE_PACKAGES } from "@/lib/packages"
 import { getErrorMessage } from "@/lib/utils"
+import { put, del } from "@vercel/blob"
 
 const initialState = {
   success: false,
@@ -17,16 +18,7 @@ const initialState = {
   error: "",
 }
 
-// Helper function to safely handle database operations
-async function safeDbOperation<T>(operation: () => Promise<T>, fallback: T, errorContext: string): Promise<T> {
-  try {
-    return await operation()
-  } catch (error: any) {
-    console.error(`[${errorContext}] Database operation failed:`, error?.message ?? error)
-    return fallback
-  }
-}
-
+// All helper functions like ensureUser, getUserData, etc. remain the same...
 async function ensureUser(walletAddress: string) {
   const admin = createSupabaseAdminClient()
   const { error: userError } = await admin.from("users").insert({ wallet_address: walletAddress }).single()
@@ -42,59 +34,50 @@ async function ensureUser(walletAddress: string) {
     throw new Error(`Failed to ensure revenue row: ${revError.message}`)
   }
 }
-
 async function getFreeCreditsTotal(
   admin: any,
   walletAddress: string,
 ): Promise<{ totalFreeLines: number; totalFreeNukes: number }> {
-  return safeDbOperation(
-    async () => {
-      try {
-        const { data: rpcData, error: rpcErr } = await admin
-          .rpc("get_total_free_credits", { p_user_wallet_address: walletAddress })
-          .single()
-        if (!rpcErr && rpcData && typeof rpcData === "object") {
-          const totalFreeLines = Number(rpcData.total_free_lines ?? 0)
-          const totalFreeNukes = Number(rpcData.total_free_nukes ?? 0)
-          if (!isNaN(totalFreeLines) && !isNaN(totalFreeNukes) && totalFreeLines >= 0 && totalFreeNukes >= 0) {
-            return { totalFreeLines, totalFreeNukes }
-          }
-        }
-        console.warn("[StreamSketch] RPC returned invalid data, falling back to direct queries:", rpcData)
-      } catch (err: any) {
-        console.warn("[StreamSketch] RPC failed, falling back to direct queries:", err?.message ?? err)
+  try {
+    const { data: rpcData, error: rpcErr } = await admin
+      .rpc("get_total_free_credits", { p_user_wallet_address: walletAddress })
+      .single()
+    if (!rpcErr && rpcData && typeof rpcData === "object") {
+      const totalFreeLines = Number(rpcData.total_free_lines ?? 0)
+      const totalFreeNukes = Number(rpcData.total_free_nukes ?? 0)
+      if (!isNaN(totalFreeLines) && !isNaN(totalFreeNukes) && totalFreeLines >= 0 && totalFreeNukes >= 0) {
+        return { totalFreeLines, totalFreeNukes }
       }
-
-      // Fallback to direct queries
-      const [lineResult, nukeResult] = await Promise.allSettled([
-        admin.from("session_free_line_credits").select("amount").eq("user_wallet_address", walletAddress),
-        admin.from("session_free_nuke_credits").select("amount").eq("user_wallet_address", walletAddress),
-      ])
-
-      let totalFreeLines = 0
-      let totalFreeNukes = 0
-
-      if (lineResult.status === "fulfilled" && lineResult.value.data) {
-        totalFreeLines = lineResult.value.data.reduce(
-          (sum: number, row: { amount: number }) => sum + (row.amount ?? 0),
-          0,
-        )
-      }
-
-      if (nukeResult.status === "fulfilled" && nukeResult.value.data) {
-        totalFreeNukes = nukeResult.value.data.reduce(
-          (sum: number, row: { amount: number }) => sum + (row.amount ?? 0),
-          0,
-        )
-      }
-
-      return { totalFreeLines, totalFreeNukes }
-    },
-    { totalFreeLines: 0, totalFreeNukes: 0 },
-    "getFreeCreditsTotal",
-  )
+    }
+    console.warn("[StreamSketch] RPC returned invalid data, falling back to direct queries:", rpcData)
+  } catch (err: any) {
+    console.warn("[StreamSketch] RPC failed, falling back to direct queries:", err?.message ?? err)
+  }
+  try {
+    const [lineResult, nukeResult] = await Promise.allSettled([
+      admin.from("session_free_line_credits").select("amount").eq("user_wallet_address", walletAddress),
+      admin.from("session_free_nuke_credits").select("amount").eq("user_wallet_address", walletAddress),
+    ])
+    let totalFreeLines = 0
+    let totalFreeNukes = 0
+    if (lineResult.status === "fulfilled" && lineResult.value.data) {
+      totalFreeLines = lineResult.value.data.reduce(
+        (sum: number, row: { amount: number }) => sum + (row.amount ?? 0),
+        0,
+      )
+    }
+    if (nukeResult.status === "fulfilled" && nukeResult.value.data) {
+      totalFreeNukes = nukeResult.value.data.reduce(
+        (sum: number, row: { amount: number }) => sum + (row.amount ?? 0),
+        0,
+      )
+    }
+    return { totalFreeLines, totalFreeNukes }
+  } catch (err: any) {
+    console.error("[StreamSketch] All free credit queries failed:", err?.message ?? err)
+    return { totalFreeLines: 0, totalFreeNukes: 0 }
+  }
 }
-
 export async function updateUserUsername(walletAddress: string, newUsername: string) {
   const admin = createSupabaseAdminClient()
   const { error } = await admin.from("users").update({ username: newUsername }).eq("wallet_address", walletAddress)
@@ -106,157 +89,79 @@ export async function updateUserUsername(walletAddress: string, newUsername: str
   revalidatePath("/dashboard")
   return { success: true }
 }
-
 export async function getUserData(walletAddress: string) {
   const admin = createSupabaseAdminClient()
-
-  return safeDbOperation(
-    async () => {
-      await ensureUser(walletAddress)
-
-      const { data: userData, error: userError } = await admin
-        .from("users")
-        .select("username, line_credits_standard, line_credits_discounted")
-        .eq("wallet_address", walletAddress)
+  await ensureUser(walletAddress)
+  try {
+    const { data: userData, error: userError } = await admin
+      .from("users")
+      .select("username, line_credits_standard, line_credits_discounted")
+      .eq("wallet_address", walletAddress)
+      .single()
+    if (userError || !userData) {
+      console.error("[StreamSketch] Error getting user data:", userError?.message || "(unknown)")
+      throw new Error(userError?.message || "Failed to fetch user data")
+    }
+    const { data: revenueData, error: revenueError } = await admin
+      .from("revenue")
+      .select("unclaimed_sol, total_claimed_sol")
+      .eq("streamer_wallet_address", walletAddress)
+      .single()
+    if (revenueError && revenueError.code !== "PGRST116") {
+      console.error("[StreamSketch] Error getting revenue data:", revenueError.message)
+      throw revenueError
+    }
+    let giftingData = { lines_gifted: 0, nukes_gifted: 0 }
+    try {
+      const { data: giftingResult, error: giftingError } = await admin
+        .rpc("get_gifting_limits", { p_streamer_wallet_address: walletAddress })
         .single()
-
-      if (userError || !userData) {
-        console.error("[StreamSketch] Error getting user data:", userError?.message || "(unknown)")
-        throw new Error(userError?.message || "Failed to fetch user data")
-      }
-
-      // Get revenue data with fallback
-      const { data: revenueData, error: revenueError } = await admin
-        .from("revenue")
-        .select("unclaimed_sol, total_claimed")
-        .eq("streamer_wallet_address", walletAddress)
-        .single()
-
-      if (revenueError && revenueError.code !== "PGRST116") {
-        console.error("[StreamSketch] Error getting revenue data:", revenueError.message)
-        // Don't throw, just use defaults
-      }
-
-      // Get gifting data with fallback
-      let giftingData = { lines_gifted: 0, nukes_gifted: 0 }
-      try {
-        const { data: giftingResult, error: giftingError } = await admin
-          .rpc("get_gifting_limits", { p_streamer_wallet_address: walletAddress })
-          .single()
-        if (!giftingError && giftingResult) {
-          giftingData = {
-            lines_gifted: giftingResult.lines_gifted ?? 0,
-            nukes_gifted: giftingResult.nukes_gifted ?? 0,
-          }
+      if (!giftingError && giftingResult) {
+        giftingData = {
+          lines_gifted: giftingResult.lines_gifted ?? 0,
+          nukes_gifted: giftingResult.nukes_gifted ?? 0,
         }
-      } catch (err: any) {
-        console.warn("[StreamSketch] Error fetching gifting limits, using defaults:", err?.message ?? err)
       }
-
-      const { totalFreeLines, totalFreeNukes } = await getFreeCreditsTotal(admin, walletAddress)
-
-      return {
-        lineCredits: (userData.line_credits_standard || 0) + (userData.line_credits_discounted || 0),
-        unclaimedSol: revenueData?.unclaimed_sol ?? 0,
-        totalClaimedSol: revenueData?.total_claimed ?? 0,
-        username: userData.username ?? null,
-        linesGifted: giftingData.lines_gifted,
-        nukesGifted: giftingData.nukes_gifted,
-        totalFreeLines,
-        totalFreeNukes,
-      }
-    },
-    {
-      lineCredits: 0,
-      unclaimedSol: 0,
-      totalClaimedSol: 0,
-      username: null,
-      linesGifted: 0,
-      nukesGifted: 0,
-      totalFreeLines: 0,
-      totalFreeNukes: 0,
-    },
-    "getUserData",
-  )
+    } catch (err: any) {
+      console.warn("[StreamSketch] Error fetching gifting limits, using defaults:", err?.message ?? err)
+    }
+    const { totalFreeLines, totalFreeNukes } = await getFreeCreditsTotal(admin, walletAddress)
+    return {
+      lineCredits: (userData.line_credits_standard || 0) + (userData.line_credits_discounted || 0),
+      unclaimedSol: revenueData?.unclaimed_sol ?? 0,
+      totalClaimedSol: revenueData?.total_claimed_sol ?? 0,
+      username: userData.username ?? null,
+      linesGifted: giftingData.lines_gifted,
+      nukesGifted: giftingData.nukes_gifted,
+      totalFreeLines,
+      totalFreeNukes,
+    }
+  } catch (error: any) {
+    console.error("[StreamSketch] getUserData failed:", error?.message ?? error)
+    throw new Error(`Failed to get user data: ${error?.message ?? "Unknown error"}`)
+  }
 }
-
 export async function getUserSessions(walletAddress: string) {
-  return safeDbOperation(
-    async () => {
-      const admin = createSupabaseAdminClient()
-      const { data, error } = await admin
-        .from("sessions")
-        .select("id, short_code, is_active, created_at")
-        .eq("owner_wallet_address", walletAddress)
-        .order("created_at", { ascending: false })
-      if (error) throw new Error(error.message)
-      return data || []
-    },
-    [],
-    "getUserSessions",
-  )
+  const admin = createSupabaseAdminClient()
+  const { data, error } = await admin
+    .from("sessions")
+    .select("id, short_code, is_active, created_at")
+    .eq("owner_wallet_address", walletAddress)
+    .order("created_at", { ascending: false })
+  if (error) throw new Error(error.message)
+  return data
 }
-
 export async function getTransactionHistory(walletAddress: string) {
-  return safeDbOperation(
-    async () => {
-      const admin = createSupabaseAdminClient()
-      const { data, error } = await admin
-        .from("transactions")
-        .select("id, transaction_type, sol_amount, credit_amount, notes, created_at, signature")
-        .eq("user_wallet_address", walletAddress)
-        .order("created_at", { ascending: false })
-        .limit(50)
-      if (error) throw new Error(error.message)
-      return data || []
-    },
-    [],
-    "getTransactionHistory",
-  )
+  const admin = createSupabaseAdminClient()
+  const { data, error } = await admin
+    .from("transactions")
+    .select("id, transaction_type, sol_amount, credit_amount, notes, created_at, signature")
+    .eq("user_wallet_address", walletAddress)
+    .order("created_at", { ascending: false })
+    .limit(50)
+  if (error) throw new Error(error.message)
+  return data
 }
-
-export async function getLeaderboard() {
-  return safeDbOperation(
-    async () => {
-      const admin = createSupabaseAdminClient()
-      const { data, error } = await admin.rpc("get_leaderboard", { p_limit: 10 })
-      if (error) {
-        console.error("Failed to fetch leaderboard:", error)
-        throw new Error(error.message)
-      }
-      return data || []
-    },
-    [],
-    "getLeaderboard",
-  )
-}
-
-export async function getUserRank(walletAddress: string) {
-  return safeDbOperation(
-    async () => {
-      const admin = createSupabaseAdminClient()
-      const { data, error } = await admin.rpc("get_user_rank", { p_wallet_address: walletAddress })
-      if (error) {
-        console.error("Failed to fetch user rank:", error)
-        throw new Error(error.message)
-      }
-      // The RPC returns an array with one object, so we extract the first item
-      const result = Array.isArray(data) && data.length > 0 ? data[0] : null
-      return {
-        user_rank: result?.user_rank ?? 0,
-        total_earnings: result?.total_earnings ?? 0,
-        total_users_with_earnings: result?.total_users_with_earnings ?? 0,
-      }
-    },
-    {
-      user_rank: 0,
-      total_earnings: 0,
-      total_users_with_earnings: 0,
-    },
-    "getUserRank",
-  )
-}
-
 export async function createSession(walletAddress: string, sessionName: string) {
   const admin = createSupabaseAdminClient()
   await ensureUser(walletAddress)
@@ -395,7 +300,6 @@ export async function getSessionData(shortCode: string) {
   if (drawingsError) throw new Error(drawingsError.message)
   return { session, drawings: drawings as Drawing[] }
 }
-
 export async function claimRevenueAction(prevState: any, formData: FormData) {
   const supabase = createSupabaseAdminClient()
   const streamerWallet = formData.get("streamer_wallet") as string
@@ -471,7 +375,7 @@ export async function claimRevenueAction(prevState: any, formData: FormData) {
     await supabase.from("transactions").delete().eq("id", transactionId)
     await supabase
       .from("revenue")
-      .update({ unclaimed_sol: claimAmount, total_claimed: 0 }) // This is a simplified revert, might need adjustment based on exact schema
+      .update({ unclaimed_sol: claimAmount, total_claimed_sol: 0 }) // This is a simplified revert, might need adjustment based on exact schema
       .eq("streamer_wallet_address", streamerWallet)
 
     return {
@@ -480,7 +384,6 @@ export async function claimRevenueAction(prevState: any, formData: FormData) {
     }
   }
 }
-
 export async function deleteSession(sessionId: string, walletAddress: string) {
   const admin = createSupabaseAdminClient()
   const { data: session, error: fetchError } = await admin
@@ -496,143 +399,99 @@ export async function deleteSession(sessionId: string, walletAddress: string) {
   revalidatePath("/dashboard")
   return { success: true }
 }
-
-// FIXED: Gift credits to session function with proper error handling and robust structure
 export async function giftCreditsToSessionAction(
   ownerWallet: string,
-  sessionId: number,
+  sessionId: string,
   viewerWallet: string,
-  linesToGift: number,
-  nukesToGift: number,
+  lines: number,
+  nukes: number,
 ) {
-  return safeDbOperation(
-    async () => {
-      const supabase = createSupabaseAdminClient()
-
-      const { data, error } = await supabase.rpc("gift_credits_to_session", {
-        p_owner_wallet: ownerWallet,
-        p_session_id: sessionId,
-        p_viewer_wallet: viewerWallet,
-        p_lines_to_gift: linesToGift,
-        p_nukes_to_gift: nukesToGift,
-      })
-
-      if (error) {
-        console.error("Gift credits RPC error:", error)
-        return {
-          success: false,
-          error: `Gift credits RPC error: ${error.message}`,
-        }
-      }
-
-      // Handle JSON response from function
-      const result = typeof data === "string" ? JSON.parse(data) : data
-
-      if (!result?.success) {
-        return {
-          success: false,
-          error: result?.error || "Failed to gift credits",
-        }
-      }
-
-      revalidatePath("/dashboard")
-      return {
-        success: true,
-        message: result.message || "Credits gifted successfully",
-      }
-    },
-    {
-      success: false,
-      error: "An unexpected error occurred while gifting credits",
-    },
-    "giftCreditsToSessionAction",
-  )
+  if (lines <= 0 && nukes <= 0) {
+    return { success: false, error: "You must gift at least one credit." }
+  }
+  if (lines < 0 || nukes < 0) {
+    return { success: false, error: "Cannot gift a negative number of credits." }
+  }
+  const admin = createSupabaseAdminClient()
+  const { data, error } = await admin.rpc("gift_credits_to_session", {
+    p_owner_wallet: ownerWallet,
+    p_session_id: sessionId,
+    p_viewer_wallet: viewerWallet,
+    p_lines_to_gift: lines,
+    p_nukes_to_gift: nukes,
+  })
+  if (error) {
+    return { success: false, error: error.message }
+  }
+  revalidatePath("/dashboard")
+  return { success: true, message: data }
 }
-
 export async function getFreeCreditsForSession(userWallet: string, sessionId: string) {
-  return safeDbOperation(
-    async () => {
-      const admin = createSupabaseAdminClient()
-      const { data, error } = await admin.rpc("get_session_free_credits", {
-        p_user_wallet_address: userWallet,
-        p_session_id: sessionId,
-      })
-      if (error) {
-        console.warn("[StreamSketch] Error fetching session free credits:", error.message)
-        return { freeLines: 0, freeNukes: 0 }
-      }
-      const result = Array.isArray(data) && data.length > 0 ? data[0] : null
-      return {
-        freeLines: result?.free_lines ?? 0,
-        freeNukes: result?.free_nukes ?? 0,
-      }
-    },
-    { freeLines: 0, freeNukes: 0 },
-    "getFreeCreditsForSession",
-  )
+  const admin = createSupabaseAdminClient()
+  try {
+    const { data, error } = await admin.rpc("get_session_free_credits", {
+      p_user_wallet_address: userWallet,
+      p_session_id: sessionId,
+    })
+    if (error) {
+      console.warn("[StreamSketch] Error fetching session free credits:", error.message)
+      return { freeLines: 0, freeNukes: 0 }
+    }
+    const result = Array.isArray(data) && data.length > 0 ? data[0] : null
+    return {
+      freeLines: result?.free_lines ?? 0,
+      freeNukes: result?.free_nukes ?? 0,
+    }
+  } catch (error: any) {
+    console.warn("[StreamSketch] Error fetching session free credits:", error?.message ?? error)
+    return { freeLines: 0, freeNukes: 0 }
+  }
 }
-
 export async function getUserFreeCreditSessions(userWallet: string) {
-  return safeDbOperation(
-    async () => {
-      const admin = createSupabaseAdminClient()
-      const { data, error } = await admin.rpc("get_user_free_credit_sessions", {
-        p_user_wallet_address: userWallet,
-      })
-      if (error) {
-        console.warn("[StreamSketch] Error fetching free credit sessions:", error.message)
-        return []
-      }
-      return data || []
-    },
-    [],
-    "getUserFreeCreditSessions",
-  )
+  const admin = createSupabaseAdminClient()
+  try {
+    const { data, error } = await admin.rpc("get_user_free_credit_sessions", {
+      p_user_wallet_address: userWallet,
+    })
+    if (error) {
+      console.warn("[StreamSketch] Error fetching free credit sessions:", error.message)
+      return []
+    }
+    return data || []
+  } catch (error: any) {
+    console.warn("[StreamSketch] Error fetching free credit sessions:", error?.message ?? error)
+    return []
+  }
 }
-
-export async function recordDrawingAction(sessionId: number, walletAddress: string, drawingData: any) {
-  return safeDbOperation(
-    async () => {
-      const supabase = createSupabaseAdminClient()
-
-      // FIXED: Use correct parameter order that matches the SQL function
-      const { data, error } = await supabase.rpc("record_drawing", {
-        p_session_id: sessionId,
-        p_wallet_address: walletAddress,
-        p_drawing_data: drawingData,
+export async function recordDrawingAction(
+  drawerWalletAddress: string,
+  sessionId: string,
+  drawingData: { points: any[]; color: string; lineWidth: number },
+) {
+  const supabase = createSupabaseAdminClient()
+  await ensureUser(drawerWalletAddress)
+  const { data: newDrawings, error } = await supabase.rpc("record_drawing", {
+    p_drawer_wallet_address: drawerWalletAddress,
+    p_session_id: sessionId,
+    p_drawing_data: drawingData,
+  })
+  if (error) {
+    console.error("Failed to record drawing:", error)
+    return { success: false, error: error.message }
+  }
+  const newDrawing = newDrawings && newDrawings.length > 0 ? newDrawings[0] : null
+  if (newDrawing) {
+    supabase
+      .channel(`session-${sessionId}`)
+      .send({
+        type: "broadcast",
+        event: "draw",
+        payload: { drawing: newDrawing },
       })
-
-      if (error) {
-        console.error("Record drawing RPC error:", error)
-        return {
-          success: false,
-          error: `Record drawing RPC error: ${error.message}`,
-        }
-      }
-
-      // The function now returns a single JSON object, not an array
-      const result = data
-
-      if (!result || !result.success) {
-        return {
-          success: false,
-          error: result?.error || "Failed to record drawing",
-        }
-      }
-
-      return {
-        success: true,
-        message: result.message,
-        creditsUsed: result.credits_used,
-        creditsRemaining: result.credits_remaining,
-      }
-    },
-    {
-      success: false,
-      error: "An unexpected error occurred while recording drawing",
-    },
-    "recordDrawingAction",
-  )
+      .catch((err) => console.error(`[Realtime Broadcast Failed] Event: draw, Session: ${sessionId}`, err))
+  }
+  revalidatePath("/dashboard")
+  return { success: true }
 }
 
 export async function initiateNukeAction(
@@ -707,6 +566,43 @@ export async function initiateNukeAction(
   return { success: true }
 }
 
+// New leaderboard functions
+export async function getLeaderboard() {
+  const admin = createSupabaseAdminClient()
+  try {
+    const { data, error } = await admin.rpc("get_leaderboard", { p_limit: 10 })
+    if (error) {
+      console.error("Failed to fetch leaderboard:", error)
+      throw new Error(error.message)
+    }
+    return data || []
+  } catch (error: any) {
+    console.error("Leaderboard fetch failed:", error)
+    throw new Error(`Failed to fetch leaderboard: ${error.message}`)
+  }
+}
+
+export async function getUserRank(walletAddress: string) {
+  const admin = createSupabaseAdminClient()
+  try {
+    const { data, error } = await admin.rpc("get_user_rank", { p_wallet_address: walletAddress })
+    if (error) {
+      console.error("Failed to fetch user rank:", error)
+      throw new Error(error.message)
+    }
+    // The RPC returns an array with one object, so we extract the first item
+    const result = Array.isArray(data) && data.length > 0 ? data[0] : null
+    return {
+      user_rank: result?.user_rank ?? 0,
+      total_earnings: result?.total_earnings ?? 0,
+      total_users_with_earnings: result?.total_users_with_earnings ?? 0,
+    }
+  } catch (error: any) {
+    console.error("User rank fetch failed:", error)
+    throw new Error(`Failed to fetch user rank: ${error.message}`)
+  }
+}
+
 export async function getDashboardData() {
   const supabase = await createSupabaseServerClient()
   const {
@@ -723,5 +619,117 @@ export async function getDashboardData() {
     return { success: true, data }
   } catch (error: any) {
     return { success: false, error: `Failed to fetch data: ${error.message}` }
+  }
+}
+
+// --- Advertisement Actions ---
+
+export async function getStreamerAd(streamerWalletAddress: string): Promise<Advertisement | null> {
+  const admin = createSupabaseAdminClient()
+  const { data, error } = await admin
+    .from("advertisements")
+    .select("file_path, file_type, file_name")
+    .eq("streamer_wallet_address", streamerWalletAddress)
+    .eq("is_active", true)
+    .single()
+
+  if (error && error.code !== "PGRST116") {
+    console.error("Error fetching streamer ad:", error)
+    return null
+  }
+
+  return data
+    ? { filePath: data.file_path, fileType: data.file_type as "mp4" | "gif", fileName: data.file_name }
+    : null
+}
+
+export async function uploadCustomAd(
+  prevState: any,
+  formData: FormData,
+): Promise<{ success: boolean; error?: string; message?: string }> {
+  const admin = createSupabaseAdminClient()
+  const streamerWallet = formData.get("streamerWallet") as string
+  const adFile = formData.get("adFile") as File
+
+  if (!streamerWallet || !adFile) {
+    return { success: false, error: "Missing wallet address or file." }
+  }
+
+  if (adFile.size > 50 * 1024 * 1024) {
+    return { success: false, error: "File size cannot exceed 50MB." }
+  }
+
+  const fileType = adFile.type.startsWith("video/") ? "mp4" : adFile.type.startsWith("image/") ? "gif" : null
+  if (!fileType) {
+    return { success: false, error: "Invalid file type. Please upload an MP4 or GIF." }
+  }
+
+  try {
+    const { data: existingAd } = await admin
+      .from("advertisements")
+      .select("file_path")
+      .eq("streamer_wallet_address", streamerWallet)
+      .single()
+
+    if (existingAd?.file_path) {
+      await del(existingAd.file_path)
+    }
+
+    const blob = await put(`ads/${streamerWallet}/${adFile.name}`, adFile, {
+      access: "public",
+      contentType: adFile.type,
+    })
+
+    const { error: dbError } = await admin.from("advertisements").upsert(
+      {
+        streamer_wallet_address: streamerWallet,
+        file_path: blob.url,
+        file_type: fileType,
+        file_name: adFile.name,
+        is_active: true,
+      },
+      { onConflict: "streamer_wallet_address" },
+    )
+
+    if (dbError) throw dbError
+
+    revalidatePath("/dashboard")
+    return { success: true, message: "Custom advertisement uploaded successfully!" }
+  } catch (error: any) {
+    console.error("Failed to upload custom ad:", error)
+    return { success: false, error: getErrorMessage(error) }
+  }
+}
+
+export async function deleteCustomAd(
+  streamerWalletAddress: string,
+): Promise<{ success: boolean; error?: string; message?: string }> {
+  const admin = createSupabaseAdminClient()
+
+  try {
+    const { data: ad, error: fetchError } = await admin
+      .from("advertisements")
+      .select("file_path")
+      .eq("streamer_wallet_address", streamerWalletAddress)
+      .single()
+
+    if (fetchError && fetchError.code !== "PGRST116") throw fetchError
+
+    if (ad?.file_path) {
+      await del(ad.file_path)
+    }
+
+    const { error: deleteError } = await admin
+      .from("advertisements")
+      .delete()
+      .eq("streamer_wallet_address", streamerWalletAddress)
+
+    if (deleteError) throw deleteError
+
+    revalidatePath("/dashboard")
+    return { success: true, message: "Custom advertisement removed." }
+  } catch (error: any) {
+    console.error("Failed to delete custom ad:", error)
+    return { success: false, error: getErrorMessage(error) }
   }
 }

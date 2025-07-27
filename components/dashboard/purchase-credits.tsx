@@ -4,8 +4,9 @@ import { useState } from "react"
 import { useWallet } from "@solana/wallet-adapter-react"
 import { SystemProgram, Transaction, LAMPORTS_PER_SOL, Connection } from "@solana/web3.js"
 import { toast } from "sonner"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Rocket, Loader2, Wallet } from "lucide-react"
+import { Rocket, Loader2 } from "lucide-react"
 import { APP_WALLET_ADDRESS } from "@/lib/constants"
 import { processCreditPurchase } from "@/app/actions"
 import { PURCHASE_PACKAGES, type CreditPackage } from "@/lib/packages"
@@ -70,95 +71,52 @@ export function PurchaseCredits({ onPurchaseSuccess }: PurchaseCreditsProps) {
   }
 
   return (
-    <div className="space-y-4">
-      {Object.values(PURCHASE_PACKAGES).map((pkg) => (
-        <div
-          key={pkg.id}
-          className={cn(
-            "relative rounded-lg border p-4 transition-all duration-200 hover:shadow-lg",
-            pkg.isPopular
-              ? "border-neon-pink/40 bg-neon-pink/5 shadow-neon-pink/10 hover:border-neon-pink/60 hover:shadow-neon-pink/20"
-              : pkg.id === "starter"
-                ? "border-blue-400/40 bg-gradient-to-br from-blue-500/10 to-cyan-500/10 shadow-blue-400/10 hover:border-blue-400/60 hover:shadow-blue-400/20 hover:from-blue-500/15 hover:to-cyan-500/15"
-                : pkg.id === "creator"
-                  ? "border-purple-400/40 bg-gradient-to-br from-purple-500/10 to-pink-500/10 shadow-purple-400/10 hover:border-purple-400/60 hover:shadow-purple-400/20 hover:from-purple-500/15 hover:to-pink-500/15"
-                  : "border-border/40 bg-deep-space/30 hover:border-border/60 hover:bg-deep-space/50",
-          )}
-        >
-          {pkg.isPopular && (
-            <div className="absolute -top-3 right-4 rounded-full bg-gradient-to-r from-neon-pink to-purple-500 px-4 py-1.5 text-xs font-bold text-white shadow-lg shadow-neon-pink/30 animate-pulse border border-white/20">
-              ✨ Most Popular
-            </div>
-          )}
-
-          <div className="flex items-center justify-between">
-            <div className="flex-1">
-              <h4
-                className={cn(
-                  "font-semibold",
-                  pkg.id === "starter"
-                    ? "text-transparent bg-gradient-to-r from-blue-400 to-cyan-400 bg-clip-text"
-                    : pkg.id === "creator"
-                      ? "text-transparent bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text"
-                      : "text-white",
-                )}
-              >
-                {pkg.name}
-              </h4>
-              <p className="text-xs text-gray-400 mt-0.5">{formatSol(pkg.pricePerLine, 5)} SOL per line</p>
-              <div className="mt-2 flex items-baseline gap-1">
-                <span
-                  className={cn(
-                    "text-2xl font-bold",
-                    pkg.id === "starter"
-                      ? "text-blue-400 drop-shadow-[0_0_8px_rgba(59,130,246,0.5)]"
-                      : pkg.id === "creator"
-                        ? "text-purple-400 drop-shadow-[0_0_8px_rgba(147,51,234,0.5)]"
-                        : "text-neon-pink",
-                  )}
-                >
-                  {pkg.lines}
-                </span>
-                <span className="text-sm text-gray-400">lines</span>
-              </div>
-            </div>
-
-            <div className="ml-4 flex flex-col items-end gap-2">
-              <div className="text-right">
-                <div className="text-lg font-bold text-white">{pkg.price} SOL</div>
+    <Card className="border-none bg-transparent shadow-none">
+      <CardHeader>
+        <CardTitle className="text-white">Purchase Line Credits</CardTitle>
+        <CardDescription>Top up your account to keep the creativity flowing.</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="flex flex-col items-center justify-center gap-8 md:flex-row md:items-stretch">
+          {Object.values(PURCHASE_PACKAGES).map((pkg) => (
+            <div
+              key={pkg.id}
+              className={cn(
+                "relative flex flex-1 flex-col justify-between rounded-lg border bg-white/5 p-6 transition-all",
+                pkg.isPopular
+                  ? "border-yellow-400/40 shadow-lg shadow-yellow-400/10 hover:border-yellow-400/60"
+                  : "border-primary/20 hover:border-primary/40",
+              )}
+            >
+              {pkg.isPopular && (
+                <div className="absolute -top-3 right-4 rounded-full bg-yellow-400 px-3 py-1 text-xs font-bold text-black">
+                  Most Popular
+                </div>
+              )}
+              <div>
+                <h3 className="text-lg font-bold text-white">{pkg.name}</h3>
+                <p className="mt-1 text-sm text-muted-foreground">{formatSol(pkg.pricePerLine, 5)} SOL per line</p>
+                <div className="my-4">
+                  <span className={`text-4xl font-bold text-primary`}>{pkg.lines}</span>
+                  <span className="ml-2 text-lg text-muted-foreground">lines</span>
+                </div>
               </div>
               <Button
                 onClick={() => handlePurchase(pkg)}
                 disabled={!!isPurchasing || !publicKey}
-                size="sm"
-                className={cn(
-                  "bg-neon-pink text-white hover:bg-neon-pink/90 font-semibold transition-all duration-200",
-                  "disabled:opacity-50 disabled:cursor-not-allowed",
-                  isPurchasing === pkg.id && "animate-pulse",
-                )}
+                className="w-full bg-primary text-primary-foreground hover:bg-primary/90"
               >
                 {isPurchasing === pkg.id ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 ) : (
-                  <>
-                    <Rocket className="mr-1 h-4 w-4" />
-                    Buy Now
-                  </>
+                  <Rocket className="mr-2 h-4 w-4" />
                 )}
+                Purchase for {pkg.price} SOL
               </Button>
             </div>
-          </div>
+          ))}
         </div>
-      ))}
-
-      {!publicKey && (
-        <div className="rounded-lg border border-border/40 bg-deep-space/30 p-6 text-center">
-          <div className="flex flex-col items-center gap-3">
-            <Wallet className="h-10 w-10 text-gray-400" />
-            <p className="text-sm text-gray-400">Connect your wallet to purchase credits</p>
-          </div>
-        </div>
-      )}
-    </div>
+      </CardContent>
+    </Card>
   )
 }

@@ -110,7 +110,7 @@ export function SessionManager({ initialSessions }: SessionManagerProps) {
         </div>
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
           <DialogTrigger asChild>
-            <Button disabled={!publicKey} className="bg-neon-pink hover:bg-neon-pink/90 text-white">
+            <Button disabled={!publicKey}>
               <PlusCircle className="mr-2 h-4 w-4" />
               New Session
             </Button>
@@ -139,7 +139,7 @@ export function SessionManager({ initialSessions }: SessionManagerProps) {
                 </div>
               </div>
               <div className="flex justify-end">
-                <Button type="submit" disabled={isCreating} className="bg-neon-pink hover:bg-neon-pink/90 text-white">
+                <Button type="submit" disabled={isCreating}>
                   {isCreating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                   Create Session
                 </Button>

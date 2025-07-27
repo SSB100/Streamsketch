@@ -55,8 +55,8 @@ export function StatsCards({
   }, [state, onClaimSuccess])
 
   return (
-    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-      <Card className="border-primary/20 bg-deep-space/30">
+    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+      <Card className="border-primary/20 bg-white/5">
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
           <CardTitle className="text-sm font-medium text-muted-foreground">Paid Line Credits</CardTitle>
           <Rocket className="h-4 w-4 text-primary" />
@@ -66,8 +66,7 @@ export function StatsCards({
           <p className="text-xs text-muted-foreground">Credits you've purchased</p>
         </CardContent>
       </Card>
-
-      <Card className="border-green-400/20 bg-deep-space/30">
+      <Card className="border-green-400/20 bg-white/5">
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
           <CardTitle className="text-sm font-medium text-muted-foreground">Free Line Credits</CardTitle>
           <Gift className="h-4 w-4 text-green-400" />
@@ -77,8 +76,7 @@ export function StatsCards({
           <p className="text-xs text-muted-foreground">Gifted by streamers</p>
         </CardContent>
       </Card>
-
-      <Card className="border-cyan-400/20 bg-deep-space/30">
+      <Card className="border-cyan-400/20 bg-white/5">
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
           <CardTitle className="text-sm font-medium text-muted-foreground">Free Nuke Credits</CardTitle>
           <Bomb className="h-4 w-4 text-cyan-400" />
@@ -88,8 +86,7 @@ export function StatsCards({
           <p className="text-xs text-muted-foreground">Gifted by streamers</p>
         </CardContent>
       </Card>
-
-      <Card className="border-yellow-400/20 bg-deep-space/30">
+      <Card className="border-yellow-400/20 bg-white/5">
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
           <CardTitle className="text-sm font-medium text-muted-foreground">Unclaimed Revenue</CardTitle>
           <CircleDollarSign className="h-4 w-4 text-yellow-400" />
@@ -102,7 +99,7 @@ export function StatsCards({
             <Button
               type="submit"
               size="sm"
-              className="mt-2 w-full bg-yellow-400 text-white hover:bg-yellow-400/90 font-semibold"
+              className="mt-2 w-full bg-yellow-400 text-black hover:bg-yellow-400/90"
               disabled={isPending || !publicKey || unclaimedSol <= 0}
             >
               {isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
@@ -111,8 +108,7 @@ export function StatsCards({
           </form>
         </CardContent>
       </Card>
-
-      <Card className="border-green-400/20 bg-deep-space/30">
+      <Card className="border-green-400/20 bg-white/5">
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
           <CardTitle className="text-sm font-medium text-muted-foreground">Total Claimed</CardTitle>
           <Trophy className="h-4 w-4 text-green-400" />

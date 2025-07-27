@@ -10,3 +10,9 @@ export type Drawing = {
   drawer_wallet_address: string
   created_at: string // Add timestamp for race condition handling
 }
+
+export type Advertisement = {
+  filePath: string
+  fileType: "mp4" | "gif"
+  fileName: string
+}
