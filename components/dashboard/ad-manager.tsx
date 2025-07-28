@@ -114,6 +114,7 @@ export function AdManager({ initialAd }: AdManagerProps) {
         toast.error("Upload Failed", { description: result.error })
       }
     } catch (error) {
+      console.error("Upload error:", error)
       toast.error("Upload Failed", { description: "An unexpected error occurred" })
     } finally {
       setIsUploading(false)
@@ -133,8 +134,8 @@ export function AdManager({ initialAd }: AdManagerProps) {
           <div className="space-y-4">
             <p className="text-sm text-muted-foreground">Current Ad:</p>
             <div className="rounded-lg border border-border/20 bg-black/20 p-4 space-y-2">
-              {ad.fileType === "mp4" ? (
-                <video src={ad.filePath} controls className="w-full max-w-sm rounded-md" />
+              {ad.fileType === "video" || ad.fileType === "mp4" ? (
+                <video src={ad.filePath} controls className="w-full max-w-sm rounded-md" muted />
               ) : (
                 <img
                   src={ad.filePath || "/placeholder.svg"}

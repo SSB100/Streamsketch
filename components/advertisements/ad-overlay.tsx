@@ -1,117 +1,111 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import { Volume2, VolumeX } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import type { Advertisement } from "@/lib/types"
 
 interface AdOverlayProps {
+  streamerWalletAddress: string
   customAd: Advertisement | null
 }
 
-export function AdOverlay({ customAd }: AdOverlayProps) {
-  const [isVisible, setIsVisible] = useState(false)
+export function AdOverlay({ streamerWalletAddress, customAd }: AdOverlayProps) {
+  const [showAd, setShowAd] = useState(false)
   const [currentAd, setCurrentAd] = useState<Advertisement | null>(null)
+  const [isMuted, setIsMuted] = useState(true)
 
   useEffect(() => {
-    const scheduleAds = () => {
+    const checkAdSchedule = () => {
       const now = new Date()
-      const currentMinute = now.getMinutes()
-      const currentSecond = now.getSeconds()
+      const minutes = now.getMinutes()
 
-      // Calculate milliseconds until next ad time (0, 15, 30, 45 minutes)
-      const adMinutes = [0, 15, 30, 45]
-      const nextAdMinute = adMinutes.find((minute) => minute > currentMinute) || 60 + adMinutes[0]
-      const minutesUntilNext = nextAdMinute > 60 ? nextAdMinute - 60 : nextAdMinute - currentMinute
-      const millisecondsUntilNext = (minutesUntilNext * 60 - currentSecond) * 1000
+      // Show custom ads at 0, 30, and 45 minutes past the hour
+      // Show default ad at 15 minutes past the hour
+      const shouldShowCustomAd = customAd && (minutes === 0 || minutes === 30 || minutes === 45)
+      const shouldShowDefaultAd = !customAd || minutes === 15
 
-      const showAd = () => {
-        const now = new Date()
-        const minute = now.getMinutes()
-
-        // Determine which ad to show based on minute and availability
-        let adToShow: Advertisement | null = null
-
-        if (customAd) {
-          // If custom ad exists: show default at 15min, custom at 0,30,45min
-          if (minute === 15) {
-            adToShow = {
-              filePath: "/ads/default-ad.png",
-              fileType: "image",
-              fileName: "default-ad.png",
-            }
-          } else if ([0, 30, 45].includes(minute)) {
-            adToShow = customAd
-          }
-        } else {
-          // If no custom ad: show default at all times (0,15,30,45)
-          if ([0, 15, 30, 45].includes(minute)) {
-            adToShow = {
-              filePath: "/ads/default-ad.png",
-              fileType: "image",
-              fileName: "default-ad.png",
-            }
-          }
-        }
-
-        if (adToShow) {
-          setCurrentAd(adToShow)
-          setIsVisible(true)
-
-          // Hide ad after appropriate duration
-          const duration = adToShow.fileType === "mp4" ? 15000 : 10000 // 15s for video, 10s for images/gifs
-          setTimeout(() => {
-            setIsVisible(false)
-            setCurrentAd(null)
-          }, duration)
-        }
+      if (shouldShowCustomAd) {
+        setCurrentAd(customAd)
+        setShowAd(true)
+      } else if (shouldShowDefaultAd) {
+        setCurrentAd({
+          filePath: "/ads/default-ad.mp4",
+          fileType: "video",
+          fileName: "default-ad.mp4",
+        })
+        setShowAd(true)
+      } else {
+        setShowAd(false)
+        setCurrentAd(null)
       }
-
-      // Schedule the next ad
-      const timeoutId = setTimeout(() => {
-        showAd()
-        // Set up recurring schedule every 15 minutes
-        const intervalId = setInterval(showAd, 15 * 60 * 1000)
-
-        // Cleanup interval when component unmounts
-        return () => clearInterval(intervalId)
-      }, millisecondsUntilNext)
-
-      // Cleanup timeout when component unmounts
-      return () => clearTimeout(timeoutId)
     }
 
-    const cleanup = scheduleAds()
-    return cleanup
+    // Check immediately
+    checkAdSchedule()
+
+    // Check every minute
+    const interval = setInterval(checkAdSchedule, 60000)
+
+    return () => clearInterval(interval)
   }, [customAd])
 
-  if (!isVisible || !currentAd) return null
+  const handleAdEnd = () => {
+    setShowAd(false)
+    setCurrentAd(null)
+  }
+
+  const toggleMute = () => {
+    setIsMuted(!isMuted)
+  }
+
+  if (!showAd || !currentAd) return null
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
-      <div className="relative max-w-4xl max-h-[80vh] rounded-lg overflow-hidden shadow-2xl">
-        {currentAd.fileType === "mp4" ? (
-          <video
-            src={currentAd.filePath}
-            autoPlay
-            muted
-            className="w-full h-full object-contain"
-            onError={(e) => {
-              console.error("Video failed to load:", e)
-              setIsVisible(false)
-              setCurrentAd(null)
-            }}
-          />
-        ) : (
-          <img
-            src={currentAd.filePath || "/placeholder.svg"}
-            alt="Advertisement"
-            className="w-full h-full object-contain"
-            onError={(e) => {
-              console.error("Image failed to load:", e)
-              setIsVisible(false)
-              setCurrentAd(null)
-            }}
-          />
-        )}
+      <div className="relative max-w-4xl w-full mx-4">
+        <div className="relative bg-black rounded-lg overflow-hidden">
+          {currentAd.fileType === "video" || currentAd.fileType === "mp4" ? (
+            <>
+              <video
+                src={currentAd.filePath}
+                autoPlay
+                muted={isMuted}
+                onEnded={handleAdEnd}
+                className="w-full h-auto max-h-[80vh] object-contain"
+                controls={false}
+              />
+              <Button
+                onClick={toggleMute}
+                variant="ghost"
+                size="icon"
+                className="absolute bottom-4 right-4 bg-black/50 hover:bg-black/70 text-white"
+              >
+                {isMuted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
+              </Button>
+            </>
+          ) : (
+            <div className="relative">
+              <img
+                src={currentAd.filePath || "/placeholder.svg"}
+                alt="Advertisement"
+                className="w-full h-auto max-h-[80vh] object-contain"
+                onLoad={() => {
+                  // Auto-close static images after 5 seconds
+                  setTimeout(handleAdEnd, 5000)
+                }}
+              />
+            </div>
+          )}
+
+          <Button
+            onClick={handleAdEnd}
+            variant="ghost"
+            className="absolute top-4 right-4 bg-black/50 hover:bg-black/70 text-white"
+          >
+            Skip Ad
+          </Button>
+        </div>
       </div>
     </div>
   )
