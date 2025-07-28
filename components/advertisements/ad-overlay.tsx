@@ -13,9 +13,9 @@ const AD_SLOTS = [0, 15, 30, 45]
 const DEFAULT_AD_SLOT = 15
 
 const DEFAULT_AD: Advertisement = {
-  filePath: "/ads/default-ad.mp4",
-  fileType: "video",
-  fileName: "default-ad.mp4",
+  filePath: "/ads/default-ad-image.png",
+  fileType: "image",
+  fileName: "default-ad-image.png",
 }
 
 export function AdOverlay({ customAd }: AdOverlayProps) {
@@ -23,6 +23,7 @@ export function AdOverlay({ customAd }: AdOverlayProps) {
   const [currentAd, setCurrentAd] = useState<Advertisement | null>(null)
   const [isMuted, setIsMuted] = useState(true)
   const intervalRef = useRef<NodeJS.Timeout | null>(null)
+  const adTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   useEffect(() => {
     const checkAdSchedule = () => {
@@ -32,14 +33,23 @@ export function AdOverlay({ customAd }: AdOverlayProps) {
       if (AD_SLOTS.includes(minutes)) {
         let adToPlay: Advertisement = DEFAULT_AD
 
-        if (minutes === DEFAULT_AD_SLOT) {
-          adToPlay = DEFAULT_AD
-        } else if (customAd) {
+        // If no custom ad exists, show default ad at all slots
+        // If custom ad exists, show default ad only at the 15-minute slot
+        if (customAd && minutes !== DEFAULT_AD_SLOT) {
           adToPlay = customAd
+        } else {
+          adToPlay = DEFAULT_AD
         }
 
         setCurrentAd(adToPlay)
         setShowAd(true)
+
+        // Set auto-close timer for image ads (15 seconds)
+        if (adToPlay.fileType === "image") {
+          adTimeoutRef.current = setTimeout(() => {
+            handleAdEnd()
+          }, 15000) // 15 seconds
+        }
       } else {
         setShowAd(false)
         setCurrentAd(null)
@@ -65,12 +75,19 @@ export function AdOverlay({ customAd }: AdOverlayProps) {
       if (intervalRef.current) {
         clearInterval(intervalRef.current)
       }
+      if (adTimeoutRef.current) {
+        clearTimeout(adTimeoutRef.current)
+      }
     }
   }, [customAd])
 
   const handleAdEnd = () => {
     setShowAd(false)
     setCurrentAd(null)
+    if (adTimeoutRef.current) {
+      clearTimeout(adTimeoutRef.current)
+      adTimeoutRef.current = null
+    }
   }
 
   const toggleMute = () => {
@@ -110,10 +127,11 @@ export function AdOverlay({ customAd }: AdOverlayProps) {
                 src={currentAd.filePath || "/placeholder.svg"}
                 alt="Advertisement"
                 className="object-contain w-full h-auto max-h-[80vh]"
-                onLoad={() => {
-                  setTimeout(handleAdEnd, 10000)
-                }}
               />
+              {/* Show countdown for image ads */}
+              <div className="absolute bottom-4 left-4 text-white bg-black/50 px-2 py-1 rounded text-sm">
+                {currentAd.fileType === "image" && "15s"}
+              </div>
             </div>
           )}
 
