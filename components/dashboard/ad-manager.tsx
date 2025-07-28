@@ -1,5 +1,7 @@
 "use client"
 
+import type React from "react"
+
 import { useState, useRef, useEffect } from "react"
 import { useWallet } from "@solana/wallet-adapter-react"
 import { useActionState } from "react"
@@ -8,7 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { UploadCloud, Trash2, Loader2, FileCheck2, AlertCircle } from 'lucide-react'
+import { UploadCloud, Trash2, Loader2, FileCheck2, AlertCircle } from "lucide-react"
 import { uploadCustomAd, deleteCustomAd } from "@/app/actions"
 import type { Advertisement } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -70,8 +72,8 @@ export function AdManager({ initialAd }: AdManagerProps) {
 
     if (!file) return
 
-    if (file.type !== "video/mp4" && file.type !== "image/gif") {
-      setValidationError("Invalid file type. Please upload an MP4 or GIF.")
+    if (!file.type.startsWith("video/mp4") && !file.type.startsWith("image/")) {
+      setValidationError("Invalid file type. Please upload an MP4, GIF, PNG, or JPG.")
       return
     }
 
@@ -106,7 +108,9 @@ export function AdManager({ initialAd }: AdManagerProps) {
     <Card className="border-border/20 bg-white/5">
       <CardHeader>
         <CardTitle className="text-white">Custom Advertisement</CardTitle>
-        <CardDescription>Upload a short video (MP4, max 15s) or GIF to display during your sessions.</CardDescription>
+        <CardDescription>
+          Upload a short video (MP4, max 15s), GIF, or image (PNG/JPG) to display during your sessions.
+        </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-6">
         {ad ? (
@@ -116,7 +120,11 @@ export function AdManager({ initialAd }: AdManagerProps) {
               {ad.fileType === "mp4" ? (
                 <video src={ad.filePath} controls className="w-full max-w-sm rounded-md" />
               ) : (
-                <img src={ad.filePath || "/placeholder.svg"} alt="Custom Ad Preview" className="w-full max-w-sm rounded-md" />
+                <img
+                  src={ad.filePath || "/placeholder.svg"}
+                  alt="Custom Ad Preview"
+                  className="w-full max-w-sm rounded-md"
+                />
               )}
               <p className="text-xs text-muted-foreground truncate">File: {ad.fileName}</p>
             </div>
@@ -162,7 +170,7 @@ export function AdManager({ initialAd }: AdManagerProps) {
                       )}
                     </p>
                     {!selectedFile && !validationError && (
-                      <p className="text-xs text-muted-foreground">MP4 (max 15s) or GIF (max 50MB)</p>
+                      <p className="text-xs text-muted-foreground">MP4 (max 15s), GIF, PNG, JPG (max 50MB)</p>
                     )}
                   </div>
                   <Input
@@ -171,7 +179,7 @@ export function AdManager({ initialAd }: AdManagerProps) {
                     type="file"
                     ref={fileInputRef}
                     className="hidden"
-                    accept="video/mp4,image/gif"
+                    accept="video/mp4,image/gif,image/png,image/jpeg"
                     required
                     onChange={handleFileChange}
                   />

@@ -638,9 +638,13 @@ export async function getStreamerAd(streamerWalletAddress: string): Promise<Adve
     return null
   }
 
-  return data
-    ? { filePath: data.file_path, fileType: data.file_type as "mp4" | "gif", fileName: data.file_name }
-    : null
+  if (!data) return null
+
+  return {
+    filePath: data.file_path,
+    fileType: data.file_type as "mp4" | "gif" | "image",
+    fileName: data.file_name,
+  }
 }
 
 export async function uploadCustomAd(
@@ -659,9 +663,16 @@ export async function uploadCustomAd(
     return { success: false, error: "File size cannot exceed 50MB." }
   }
 
-  const fileType = adFile.type.startsWith("video/") ? "mp4" : adFile.type.startsWith("image/") ? "gif" : null
+  const fileType = adFile.type.startsWith("video/")
+    ? "mp4"
+    : adFile.type === "image/gif"
+      ? "gif"
+      : adFile.type.startsWith("image/")
+        ? "image"
+        : null
+
   if (!fileType) {
-    return { success: false, error: "Invalid file type. Please upload an MP4 or GIF." }
+    return { success: false, error: "Invalid file type. Please upload an MP4, GIF, PNG, or JPG." }
   }
 
   try {

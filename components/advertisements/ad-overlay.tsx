@@ -2,12 +2,13 @@
 
 import { useState, useEffect, useRef } from "react"
 
-const AD_DURATION_MS = 15000 // 15 seconds
+const VIDEO_AD_DURATION_MS = 15000 // 15 seconds
+const IMAGE_AD_DURATION_MS = 10000 // 10 seconds
 const DEFAULT_AD_PATH = "/ads/default-ad.mp4"
 
 type AdData = {
   filePath: string
-  fileType: "mp4" | "gif"
+  fileType: "mp4" | "gif" | "image"
 } | null
 
 interface AdOverlayProps {
@@ -16,7 +17,7 @@ interface AdOverlayProps {
 
 export function AdOverlay({ customAd }: AdOverlayProps) {
   const [isAdPlaying, setIsAdPlaying] = useState(false)
-  const [currentAd, setCurrentAd] = useState<{ src: string; type: "mp4" | "gif" } | null>(null)
+  const [currentAd, setCurrentAd] = useState<{ src: string; type: "mp4" | "gif" | "image" } | null>(null)
   const timerRef = useRef<NodeJS.Timeout | null>(null)
 
   useEffect(() => {
@@ -26,7 +27,7 @@ export function AdOverlay({ customAd }: AdOverlayProps) {
       const seconds = now.getSeconds()
 
       let nextAdMinute: number
-      let adToPlay: { src: string; type: "mp4" | "gif" }
+      let adToPlay: { src: string; type: "mp4" | "gif" | "image" }
 
       // Determine which ad to play and when
       if (customAd && [0, 20, 40].includes(minutes)) {
@@ -36,14 +37,14 @@ export function AdOverlay({ customAd }: AdOverlayProps) {
         nextAdMinute = minutes
         adToPlay = { src: DEFAULT_AD_PATH, type: "mp4" }
       } else {
-        // Find the next 15-minute interval
+        // Find the next scheduled ad time
         const intervals = customAd ? [0, 15, 20, 30, 40, 45] : [0, 15, 30, 45]
         const nextInterval = intervals.find((interval) => interval > minutes) ?? intervals[0] + 60
         const minutesUntilNextAd = nextInterval - minutes
         const delay = (minutesUntilNextAd * 60 - seconds) * 1000
 
         if (timerRef.current) clearTimeout(timerRef.current)
-        timerRef.current = setTimeout(scheduleNextAd, delay)
+        timerRef.current = setTimeout(scheduleNextAd, delay > 0 ? delay : 1000)
         return
       }
 
@@ -57,13 +58,15 @@ export function AdOverlay({ customAd }: AdOverlayProps) {
         const delay = (minutesUntilNextAd * 60 - seconds) * 1000
 
         if (timerRef.current) clearTimeout(timerRef.current)
-        timerRef.current = setTimeout(scheduleNextAd, delay)
+        timerRef.current = setTimeout(scheduleNextAd, delay > 0 ? delay : 1000)
         return
       }
 
       // Play the ad
       setCurrentAd(adToPlay)
       setIsAdPlaying(true)
+
+      const adDuration = adToPlay.type === "image" ? IMAGE_AD_DURATION_MS : VIDEO_AD_DURATION_MS
 
       // Hide the ad after its duration
       setTimeout(() => {
@@ -72,7 +75,7 @@ export function AdOverlay({ customAd }: AdOverlayProps) {
         // Schedule the next ad check after the current one finishes + a small buffer
         if (timerRef.current) clearTimeout(timerRef.current)
         timerRef.current = setTimeout(scheduleNextAd, 60 * 1000) // Check again in 1 minute
-      }, AD_DURATION_MS)
+      }, adDuration)
     }
 
     scheduleNextAd()

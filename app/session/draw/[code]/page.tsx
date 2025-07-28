@@ -3,13 +3,14 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from "react"
 import { useWallet } from "@solana/wallet-adapter-react"
 import { SystemProgram, Transaction, LAMPORTS_PER_SOL, Connection } from "@solana/web3.js"
-import type { Drawing } from "@/lib/types"
+import type { Drawing, Advertisement } from "@/lib/types"
 import { Canvas, type CanvasHandle } from "@/components/whiteboard/canvas"
 import { ColorPicker } from "@/components/whiteboard/color-picker"
 import { BrushSizePicker } from "@/components/whiteboard/brush-size-picker"
 import { PurchaseCredits } from "@/components/dashboard/purchase-credits"
 import { NukeSelectionDialog } from "@/components/whiteboard/nuke-selection-dialog"
 import { NukeAnimationOverlay } from "@/components/whiteboard/nuke-animation-overlay"
+import { AdOverlay } from "@/components/advertisements/ad-overlay"
 import { useRealtimeChannel, type ConnectionStatus } from "@/hooks/use-realtime-channel"
 import {
   getSessionData,
@@ -17,8 +18,9 @@ import {
   getFreeCreditsForSession,
   recordDrawingAction,
   initiateNukeAction,
+  getStreamerAd,
 } from "@/app/actions"
-import { Rocket, Edit, Bomb, RefreshCw, Wifi, WifiOff } from "lucide-react"
+import { Rocket, Edit, Bomb, RefreshCw } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import {
@@ -32,6 +34,7 @@ import {
 import type { NukeAnimation } from "@/lib/nuke-animations"
 import { APP_WALLET_ADDRESS } from "@/lib/constants"
 import { ErrorBoundary } from "@/components/error-boundary"
+import { ConnectionIndicator } from "@/components/session/connection-indicator"
 
 function DrawPageContent({ params }: { params: { code: string } }) {
   const { publicKey, sendTransaction, wallet } = useWallet()
@@ -49,6 +52,7 @@ function DrawPageContent({ params }: { params: { code: string } }) {
   const [nukeEvent, setNukeEvent] = useState<{ username: string | null; animationId: string } | null>(null)
   const [color, setColor] = useState("#FFFFFF")
   const [brushSize, setBrushSize] = useState(5)
+  const [customAd, setCustomAd] = useState<Advertisement | null>(null)
 
   const canvasRef = useRef<CanvasHandle>(null)
   const lastNukeTimestampRef = useRef<number>(0)
@@ -163,6 +167,15 @@ function DrawPageContent({ params }: { params: { code: string } }) {
         }
         setSession(s as { id: string; owner_wallet_address: string })
         setDrawings(d)
+
+        // Fetch ad data safely
+        try {
+          const ad = await getStreamerAd(s.owner_wallet_address)
+          setCustomAd(ad)
+        } catch (adError) {
+          console.error("Failed to fetch custom ad:", adError)
+          // Don't show an error toast for this, just continue without the ad
+        }
       } catch (err) {
         console.error("Bootstrap failed:", err)
         toast.error("Failed to load session data.")
@@ -351,51 +364,17 @@ function DrawPageContent({ params }: { params: { code: string } }) {
     )
   }
 
-  const ConnectionIndicator = () => {
-    const getStatusColor = () => {
-      switch (connectionStatus) {
-        case "connected":
-          return "text-green-400"
-        case "disconnected":
-          return "text-red-400"
-        case "reconnecting":
-          return "text-yellow-400"
-        default:
-          return "text-gray-400"
-      }
-    }
-
-    const getStatusIcon = () => {
-      switch (connectionStatus) {
-        case "connected":
-          return <Wifi className="h-4 w-4" />
-        case "disconnected":
-          return <WifiOff className="h-4 w-4" />
-        case "reconnecting":
-          return <RefreshCw className="h-4 w-4 animate-spin" />
-        default:
-          return <Wifi className="h-4 w-4" />
-      }
-    }
-
-    return (
-      <div className={`flex items-center gap-1 ${getStatusColor()}`}>
-        {getStatusIcon()}
-        <span className="text-xs font-medium capitalize">{connectionStatus}</span>
-      </div>
-    )
-  }
-
   return (
     <main className="flex h-screen flex-col items-center justify-center bg-deep-space gap-4 p-4">
       <NukeAnimationOverlay nukeEvent={nukeEvent} />
+      <AdOverlay customAd={customAd} />
       <div className="absolute left-4 top-4 flex items-center gap-4">
         <div className="flex items-center gap-2 rounded-full bg-black/50 px-4 py-2 text-white">
           <Edit className="h-5 w-5 text-neon-pink" />
           <span className="font-bold">DRAWING MODE</span>
         </div>
         <div className="rounded-full bg-black/50 px-3 py-2">
-          <ConnectionIndicator />
+          <ConnectionIndicator status={connectionStatus} />
         </div>
       </div>
       <div className="absolute right-4 top-4">
