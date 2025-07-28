@@ -644,7 +644,7 @@ export async function getStreamerAd(streamerWalletAddress: string): Promise<Adve
 
     return {
       filePath: data.file_path,
-      fileType: data.file_type as "mp4" | "gif" | "image",
+      fileType: data.file_type as Advertisement["fileType"],
       fileName: data.file_name,
     }
   } catch (error) {
@@ -670,9 +670,9 @@ export async function uploadCustomAd(
   }
 
   // Map file types to database enum values
-  let fileType: string
+  let fileType: Advertisement["fileType"]
   if (adFile.type.startsWith("video/")) {
-    fileType = "video" // Changed from "mp4" to "video"
+    fileType = "video"
   } else if (adFile.type === "image/gif") {
     fileType = "gif"
   } else if (adFile.type.startsWith("image/")) {
@@ -701,7 +701,7 @@ export async function uploadCustomAd(
     const blob = await put(`ads/${streamerWallet}/${adFile.name}`, adFile, {
       access: "public",
       contentType: adFile.type,
-      allowOverwrite: true, // Add this line to allow overwriting existing files
+      allowOverwrite: true,
     })
 
     // Save to database
@@ -709,7 +709,7 @@ export async function uploadCustomAd(
       {
         streamer_wallet_address: streamerWallet,
         file_path: blob.url,
-        file_type: fileType, // Use the mapped file type
+        file_type: fileType,
         file_name: adFile.name,
         is_active: true,
       },

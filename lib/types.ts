@@ -13,7 +13,7 @@ export type Drawing = {
 
 export type Advertisement = {
   filePath: string
-  fileType: "mp4" | "gif" | "image"
+  fileType: "video" | "gif" | "image"
   fileName: string
 }
 

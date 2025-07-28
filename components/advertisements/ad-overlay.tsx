@@ -6,7 +6,6 @@ import { Button } from "@/components/ui/button"
 import type { Advertisement } from "@/lib/types"
 
 interface AdOverlayProps {
-  streamerWalletAddress: string
   customAd: Advertisement | null
 }
 
@@ -19,7 +18,7 @@ const DEFAULT_AD: Advertisement = {
   fileName: "default-ad.mp4",
 }
 
-export function AdOverlay({ streamerWalletAddress, customAd }: AdOverlayProps) {
+export function AdOverlay({ customAd }: AdOverlayProps) {
   const [showAd, setShowAd] = useState(false)
   const [currentAd, setCurrentAd] = useState<Advertisement | null>(null)
   const [isMuted, setIsMuted] = useState(true)
@@ -38,18 +37,15 @@ export function AdOverlay({ streamerWalletAddress, customAd }: AdOverlayProps) {
         } else if (customAd) {
           adToPlay = customAd
         }
-        // If it's an ad slot other than 15 and there's no custom ad, it will correctly fall back to the default ad.
 
         setCurrentAd(adToPlay)
         setShowAd(true)
       } else {
-        // This ensures the ad is not shown on non-ad minutes
         setShowAd(false)
         setCurrentAd(null)
       }
     }
 
-    // This function ensures the check happens precisely at the start of each minute.
     const scheduleNextCheck = () => {
       const now = new Date()
       const seconds = now.getSeconds()
@@ -57,8 +53,7 @@ export function AdOverlay({ streamerWalletAddress, customAd }: AdOverlayProps) {
       const msUntilNextMinute = (60 - seconds) * 1000 - milliseconds
 
       setTimeout(() => {
-        checkAdSchedule() // Run the check once aligned to the minute.
-        // Then, set a precise interval to run every 60 seconds.
+        checkAdSchedule()
         if (intervalRef.current) clearInterval(intervalRef.current)
         intervalRef.current = setInterval(checkAdSchedule, 60000)
       }, msUntilNextMinute)
@@ -86,17 +81,17 @@ export function AdOverlay({ streamerWalletAddress, customAd }: AdOverlayProps) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
-      <div className="relative max-w-4xl w-full mx-4">
-        <div className="relative bg-black rounded-lg overflow-hidden">
-          {currentAd.fileType === "video" || currentAd.fileType === "mp4" ? (
+      <div className="relative w-full max-w-4xl mx-4">
+        <div className="relative overflow-hidden bg-black rounded-lg">
+          {currentAd.fileType === "video" ? (
             <>
               <video
                 key={currentAd.filePath}
-                src={currentAd.filePath}
+                src={currentAd.filePath || "/placeholder.svg"}
                 autoPlay
                 muted={isMuted}
                 onEnded={handleAdEnd}
-                className="w-full h-auto max-h-[80vh] object-contain"
+                className="object-contain w-full h-auto max-h-[80vh]"
                 controls={false}
                 playsInline
               />
@@ -104,9 +99,9 @@ export function AdOverlay({ streamerWalletAddress, customAd }: AdOverlayProps) {
                 onClick={toggleMute}
                 variant="ghost"
                 size="icon"
-                className="absolute bottom-4 right-4 bg-black/50 hover:bg-black/70 text-white"
+                className="absolute bottom-4 right-4 text-white bg-black/50 hover:bg-black/70"
               >
-                {isMuted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
+                {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
               </Button>
             </>
           ) : (
@@ -114,9 +109,8 @@ export function AdOverlay({ streamerWalletAddress, customAd }: AdOverlayProps) {
               <img
                 src={currentAd.filePath || "/placeholder.svg"}
                 alt="Advertisement"
-                className="w-full h-auto max-h-[80vh] object-contain"
+                className="object-contain w-full h-auto max-h-[80vh]"
                 onLoad={() => {
-                  // Auto-close static images after 10 seconds
                   setTimeout(handleAdEnd, 10000)
                 }}
               />
@@ -126,7 +120,7 @@ export function AdOverlay({ streamerWalletAddress, customAd }: AdOverlayProps) {
           <Button
             onClick={handleAdEnd}
             variant="ghost"
-            className="absolute top-4 right-4 bg-black/50 hover:bg-black/70 text-white"
+            className="absolute top-4 right-4 text-white bg-black/50 hover:bg-black/70"
           >
             Skip Ad
           </Button>
