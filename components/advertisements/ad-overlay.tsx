@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Volume2, VolumeX } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import type { Advertisement } from "@/lib/types"
@@ -10,44 +10,67 @@ interface AdOverlayProps {
   customAd: Advertisement | null
 }
 
+const AD_SLOTS = [0, 15, 30, 45]
+const DEFAULT_AD_SLOT = 15
+
+const DEFAULT_AD: Advertisement = {
+  filePath: "/ads/default-ad.mp4",
+  fileType: "video",
+  fileName: "default-ad.mp4",
+}
+
 export function AdOverlay({ streamerWalletAddress, customAd }: AdOverlayProps) {
   const [showAd, setShowAd] = useState(false)
   const [currentAd, setCurrentAd] = useState<Advertisement | null>(null)
   const [isMuted, setIsMuted] = useState(true)
+  const intervalRef = useRef<NodeJS.Timeout | null>(null)
 
   useEffect(() => {
     const checkAdSchedule = () => {
       const now = new Date()
       const minutes = now.getMinutes()
 
-      // Show custom ads at 0, 30, and 45 minutes past the hour
-      // Show default ad at 15 minutes past the hour
-      const shouldShowCustomAd = customAd && (minutes === 0 || minutes === 30 || minutes === 45)
-      const shouldShowDefaultAd = !customAd || minutes === 15
+      if (AD_SLOTS.includes(minutes)) {
+        let adToPlay: Advertisement = DEFAULT_AD
 
-      if (shouldShowCustomAd) {
-        setCurrentAd(customAd)
-        setShowAd(true)
-      } else if (shouldShowDefaultAd) {
-        setCurrentAd({
-          filePath: "/ads/default-ad.mp4",
-          fileType: "video",
-          fileName: "default-ad.mp4",
-        })
+        if (minutes === DEFAULT_AD_SLOT) {
+          adToPlay = DEFAULT_AD
+        } else if (customAd) {
+          adToPlay = customAd
+        }
+        // If it's an ad slot other than 15 and there's no custom ad, it will correctly fall back to the default ad.
+
+        setCurrentAd(adToPlay)
         setShowAd(true)
       } else {
+        // This ensures the ad is not shown on non-ad minutes
         setShowAd(false)
         setCurrentAd(null)
       }
     }
 
-    // Check immediately
-    checkAdSchedule()
+    // This function ensures the check happens precisely at the start of each minute.
+    const scheduleNextCheck = () => {
+      const now = new Date()
+      const seconds = now.getSeconds()
+      const milliseconds = now.getMilliseconds()
+      const msUntilNextMinute = (60 - seconds) * 1000 - milliseconds
 
-    // Check every minute
-    const interval = setInterval(checkAdSchedule, 60000)
+      setTimeout(() => {
+        checkAdSchedule() // Run the check once aligned to the minute.
+        // Then, set a precise interval to run every 60 seconds.
+        if (intervalRef.current) clearInterval(intervalRef.current)
+        intervalRef.current = setInterval(checkAdSchedule, 60000)
+      }, msUntilNextMinute)
+    }
 
-    return () => clearInterval(interval)
+    scheduleNextCheck()
+
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current)
+      }
+    }
   }, [customAd])
 
   const handleAdEnd = () => {
@@ -68,12 +91,14 @@ export function AdOverlay({ streamerWalletAddress, customAd }: AdOverlayProps) {
           {currentAd.fileType === "video" || currentAd.fileType === "mp4" ? (
             <>
               <video
+                key={currentAd.filePath}
                 src={currentAd.filePath}
                 autoPlay
                 muted={isMuted}
                 onEnded={handleAdEnd}
                 className="w-full h-auto max-h-[80vh] object-contain"
                 controls={false}
+                playsInline
               />
               <Button
                 onClick={toggleMute}
@@ -91,8 +116,8 @@ export function AdOverlay({ streamerWalletAddress, customAd }: AdOverlayProps) {
                 alt="Advertisement"
                 className="w-full h-auto max-h-[80vh] object-contain"
                 onLoad={() => {
-                  // Auto-close static images after 5 seconds
-                  setTimeout(handleAdEnd, 5000)
+                  // Auto-close static images after 10 seconds
+                  setTimeout(handleAdEnd, 10000)
                 }}
               />
             </div>

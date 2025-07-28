@@ -21,7 +21,6 @@ interface SessionViewProps {
 }
 
 function SessionViewContent({ initialSession, initialDrawings, customAd, sessionCode }: SessionViewProps) {
-  const [session] = useState(initialSession)
   const [drawings, setDrawings] = useState<Drawing[]>(initialDrawings)
   const [nukeEvent, setNukeEvent] = useState<{ username: string | null; animationId: string } | null>(null)
 
@@ -53,10 +52,10 @@ function SessionViewContent({ initialSession, initialDrawings, customAd, session
     }),
     [handleIncomingNuke, handleIncomingDraw],
   )
-  const { connectionStatus } = useRealtimeChannel(session?.id ?? null, channelOptions)
+  const { connectionStatus } = useRealtimeChannel(initialSession?.id ?? null, channelOptions)
 
   const syncCanvasState = useCallback(async () => {
-    if (!session) return
+    if (!initialSession) return
     console.log("[Sync] Fetching latest canvas state...")
     try {
       const { drawings: serverDrawings } = await getSessionData(sessionCode)
@@ -65,7 +64,7 @@ function SessionViewContent({ initialSession, initialDrawings, customAd, session
       console.error("Failed to sync canvas state:", err)
       toast.error("Could not re-sync canvas state.")
     }
-  }, [session, sessionCode])
+  }, [initialSession, sessionCode])
 
   useEffect(() => {
     if (previousConnectionStatus.current !== "connected" && connectionStatus === "connected") {
@@ -77,22 +76,24 @@ function SessionViewContent({ initialSession, initialDrawings, customAd, session
   }, [connectionStatus, syncCanvasState])
 
   return (
-    <main className="flex h-screen flex-col items-center justify-center bg-deep-space gap-4 p-4">
+    <div className="flex h-full w-full flex-col items-center justify-center p-4">
       <NukeAnimationOverlay nukeEvent={nukeEvent} />
       <AdOverlay customAd={customAd} />
-      <div className="absolute left-4 top-4 flex items-center gap-4">
+      <div className="absolute left-4 top-4 z-10 flex items-center gap-4">
         <div className="rounded-full bg-black/50 px-3 py-2">
           <ConnectionIndicator status={connectionStatus} />
         </div>
       </div>
-      <div className="absolute right-4 top-4">
+      <div className="absolute right-4 top-4 z-10">
         <Button variant="outline" size="sm" onClick={() => window.location.reload()}>
           <RefreshCw className="mr-2 h-4 w-4" />
           Full Refresh
         </Button>
       </div>
-      <Canvas ref={canvasRef} width={1280} height={720} isDrawable={false} initialDrawings={drawings} />
-    </main>
+      <div className="w-full h-full flex items-center justify-center">
+        <Canvas ref={canvasRef} isDrawable={false} initialDrawings={drawings} className="border-2 border-white/20" />
+      </div>
+    </div>
   )
 }
 
