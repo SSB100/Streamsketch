@@ -4,7 +4,6 @@ import type React from "react"
 
 import { useState, useRef, useEffect } from "react"
 import { useWallet } from "@solana/wallet-adapter-react"
-import { useActionState } from "react"
 import { toast } from "sonner"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -19,17 +18,11 @@ interface AdManagerProps {
   initialAd: Advertisement | null
 }
 
-const initialState = {
-  success: false,
-  error: "",
-  message: "",
-}
-
 export function AdManager({ initialAd }: AdManagerProps) {
   const { publicKey } = useWallet()
   const [ad, setAd] = useState(initialAd)
   const [isDeleting, setIsDeleting] = useState(false)
-  const [uploadState, uploadAction, isUploading] = useActionState(uploadCustomAd, initialState)
+  const [isUploading, setIsUploading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [validationError, setValidationError] = useState<string | null>(null)
@@ -38,31 +31,22 @@ export function AdManager({ initialAd }: AdManagerProps) {
     setAd(initialAd)
   }, [initialAd])
 
-  useEffect(() => {
-    if (uploadState.success) {
-      toast.success(uploadState.message)
-      setSelectedFile(null)
-      if (fileInputRef.current) {
-        fileInputRef.current.value = ""
-      }
-      // The parent component will refetch and update the initialAd prop,
-      // which will then update the local `ad` state via the other useEffect.
-    } else if (uploadState.error) {
-      toast.error("Upload Failed", { description: uploadState.error })
-    }
-  }, [uploadState])
-
   const handleDelete = async () => {
     if (!publicKey) return
     setIsDeleting(true)
-    const result = await deleteCustomAd(publicKey.toBase58())
-    if (result.success) {
-      toast.success(result.message)
-      setAd(null)
-    } else {
-      toast.error("Deletion Failed", { description: result.error })
+    try {
+      const result = await deleteCustomAd(publicKey.toBase58())
+      if (result.success) {
+        toast.success(result.message)
+        setAd(null)
+      } else {
+        toast.error("Deletion Failed", { description: result.error })
+      }
+    } catch (error) {
+      toast.error("Deletion Failed", { description: "An unexpected error occurred" })
+    } finally {
+      setIsDeleting(false)
     }
-    setIsDeleting(false)
   }
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -104,6 +88,38 @@ export function AdManager({ initialAd }: AdManagerProps) {
     }
   }
 
+  const handleUpload = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+
+    if (!publicKey || !selectedFile) return
+
+    setIsUploading(true)
+
+    try {
+      const formData = new FormData()
+      formData.append("streamerWallet", publicKey.toBase58())
+      formData.append("adFile", selectedFile)
+
+      const result = await uploadCustomAd({}, formData)
+
+      if (result.success) {
+        toast.success(result.message)
+        setSelectedFile(null)
+        if (fileInputRef.current) {
+          fileInputRef.current.value = ""
+        }
+        // Refresh the page to get updated ad data
+        window.location.reload()
+      } else {
+        toast.error("Upload Failed", { description: result.error })
+      }
+    } catch (error) {
+      toast.error("Upload Failed", { description: "An unexpected error occurred" })
+    } finally {
+      setIsUploading(false)
+    }
+  }
+
   return (
     <Card className="border-border/20 bg-white/5">
       <CardHeader>
@@ -134,8 +150,7 @@ export function AdManager({ initialAd }: AdManagerProps) {
             </Button>
           </div>
         ) : (
-          <form action={uploadAction} className="space-y-4">
-            <input type="hidden" name="streamerWallet" value={publicKey?.toBase58() ?? ""} />
+          <form onSubmit={handleUpload} className="space-y-4">
             <div>
               <Label htmlFor="adFile" className="text-white">
                 Upload Ad File

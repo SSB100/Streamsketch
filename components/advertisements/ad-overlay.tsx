@@ -1,123 +1,115 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
-
-const VIDEO_AD_DURATION_MS = 15000 // 15 seconds
-const IMAGE_AD_DURATION_MS = 10000 // 10 seconds
-const DEFAULT_AD_PATH = "/ads/default-ad.png"
-
-type AdData = {
-  filePath: string
-  fileType: "mp4" | "gif" | "image"
-} | null
+import { useState, useEffect } from "react"
+import type { Advertisement } from "@/lib/types"
 
 interface AdOverlayProps {
-  customAd: AdData
+  customAd: Advertisement | null
 }
 
 export function AdOverlay({ customAd }: AdOverlayProps) {
-  const [isAdPlaying, setIsAdPlaying] = useState(false)
-  const [currentAd, setCurrentAd] = useState<{ src: string; type: "mp4" | "gif" | "image" } | null>(null)
-  const timerRef = useRef<NodeJS.Timeout | null>(null)
+  const [isVisible, setIsVisible] = useState(false)
+  const [currentAd, setCurrentAd] = useState<Advertisement | null>(null)
 
   useEffect(() => {
-    const scheduleNextAd = () => {
+    const scheduleAds = () => {
       const now = new Date()
-      const minutes = now.getMinutes()
-      const seconds = now.getSeconds()
+      const currentMinute = now.getMinutes()
+      const currentSecond = now.getSeconds()
 
-      let nextAdMinute: number
-      let adToPlay: { src: string; type: "mp4" | "gif" | "image" }
+      // Calculate milliseconds until next ad time (0, 15, 30, 45 minutes)
+      const adMinutes = [0, 15, 30, 45]
+      const nextAdMinute = adMinutes.find((minute) => minute > currentMinute) || 60 + adMinutes[0]
+      const minutesUntilNext = nextAdMinute > 60 ? nextAdMinute - 60 : nextAdMinute - currentMinute
+      const millisecondsUntilNext = (minutesUntilNext * 60 - currentSecond) * 1000
 
-      // Ad times are always: 0, 15, 30, 45 minutes past the hour
-      const adTimes = [0, 15, 30, 45]
+      const showAd = () => {
+        const now = new Date()
+        const minute = now.getMinutes()
 
-      // Check if we're at an ad time
-      if (adTimes.includes(minutes)) {
-        nextAdMinute = minutes
+        // Determine which ad to show based on minute and availability
+        let adToShow: Advertisement | null = null
 
         if (customAd) {
-          // If custom ad exists:
-          // - 15th minute: default ad
-          // - 0, 30, 45 minutes: custom ad
-          if (minutes === 15) {
-            adToPlay = { src: DEFAULT_AD_PATH, type: "image" }
-          } else {
-            adToPlay = { src: customAd.filePath, type: customAd.fileType }
+          // If custom ad exists: show default at 15min, custom at 0,30,45min
+          if (minute === 15) {
+            adToShow = {
+              filePath: "/ads/default-ad.png",
+              fileType: "image",
+              fileName: "default-ad.png",
+            }
+          } else if ([0, 30, 45].includes(minute)) {
+            adToShow = customAd
           }
         } else {
-          // If no custom ad: default ad plays at all times (0, 15, 30, 45)
-          adToPlay = { src: DEFAULT_AD_PATH, type: "image" }
+          // If no custom ad: show default at all times (0,15,30,45)
+          if ([0, 15, 30, 45].includes(minute)) {
+            adToShow = {
+              filePath: "/ads/default-ad.png",
+              fileType: "image",
+              fileName: "default-ad.png",
+            }
+          }
         }
-      } else {
-        // Find the next ad time
-        const nextInterval = adTimes.find((time) => time > minutes) ?? adTimes[0] + 60
-        const minutesUntilNextAd = nextInterval > 60 ? nextInterval - 60 - minutes : nextInterval - minutes
-        const delay = (minutesUntilNextAd * 60 - seconds) * 1000
 
-        if (timerRef.current) clearTimeout(timerRef.current)
-        timerRef.current = setTimeout(scheduleNextAd, delay > 0 ? delay : 1000)
-        return
+        if (adToShow) {
+          setCurrentAd(adToShow)
+          setIsVisible(true)
+
+          // Hide ad after appropriate duration
+          const duration = adToShow.fileType === "mp4" ? 15000 : 10000 // 15s for video, 10s for images/gifs
+          setTimeout(() => {
+            setIsVisible(false)
+            setCurrentAd(null)
+          }, duration)
+        }
       }
 
-      // Check if we are in the first second of the target minute to avoid re-triggering
-      if (seconds > 1) {
-        // Reschedule for the next interval
-        const currentIntervalIndex = adTimes.indexOf(nextAdMinute)
-        const nextInterval = adTimes[currentIntervalIndex + 1] ?? adTimes[0] + 60
-        const minutesUntilNextAd = nextInterval > 60 ? nextInterval - 60 - minutes : nextInterval - minutes
-        const delay = (minutesUntilNextAd * 60 - seconds) * 1000
+      // Schedule the next ad
+      const timeoutId = setTimeout(() => {
+        showAd()
+        // Set up recurring schedule every 15 minutes
+        const intervalId = setInterval(showAd, 15 * 60 * 1000)
 
-        if (timerRef.current) clearTimeout(timerRef.current)
-        timerRef.current = setTimeout(scheduleNextAd, delay > 0 ? delay : 1000)
-        return
-      }
+        // Cleanup interval when component unmounts
+        return () => clearInterval(intervalId)
+      }, millisecondsUntilNext)
 
-      // Play the ad
-      setCurrentAd(adToPlay)
-      setIsAdPlaying(true)
-
-      const adDuration =
-        adToPlay.type === "image" || adToPlay.type === "gif" ? IMAGE_AD_DURATION_MS : VIDEO_AD_DURATION_MS
-
-      // Hide the ad after its duration
-      setTimeout(() => {
-        setIsAdPlaying(false)
-        setCurrentAd(null)
-        // Schedule the next ad check after the current one finishes + a small buffer
-        if (timerRef.current) clearTimeout(timerRef.current)
-        timerRef.current = setTimeout(scheduleNextAd, 60 * 1000) // Check again in 1 minute
-      }, adDuration)
+      // Cleanup timeout when component unmounts
+      return () => clearTimeout(timeoutId)
     }
 
-    scheduleNextAd()
-
-    return () => {
-      if (timerRef.current) clearTimeout(timerRef.current)
-    }
+    const cleanup = scheduleAds()
+    return cleanup
   }, [customAd])
 
-  if (!isAdPlaying || !currentAd) {
-    return null
-  }
+  if (!isVisible || !currentAd) return null
 
   return (
-    <div className="absolute inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm">
-      <div className="w-full h-full max-w-[80vw] max-h-[80vh] flex items-center justify-center">
-        {currentAd.type === "mp4" ? (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
+      <div className="relative max-w-4xl max-h-[80vh] rounded-lg overflow-hidden shadow-2xl">
+        {currentAd.fileType === "mp4" ? (
           <video
-            src={currentAd.src}
+            src={currentAd.filePath}
             autoPlay
             muted
-            playsInline
-            className="max-w-full max-h-full object-contain"
-            onEnded={() => setIsAdPlaying(false)}
+            className="w-full h-full object-contain"
+            onError={(e) => {
+              console.error("Video failed to load:", e)
+              setIsVisible(false)
+              setCurrentAd(null)
+            }}
           />
         ) : (
           <img
-            src={currentAd.src || "/placeholder.svg"}
+            src={currentAd.filePath || "/placeholder.svg"}
             alt="Advertisement"
-            className="max-w-full max-h-full object-contain"
+            className="w-full h-full object-contain"
+            onError={(e) => {
+              console.error("Image failed to load:", e)
+              setIsVisible(false)
+              setCurrentAd(null)
+            }}
           />
         )}
       </div>

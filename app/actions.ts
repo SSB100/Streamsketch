@@ -626,24 +626,30 @@ export async function getDashboardData() {
 
 export async function getStreamerAd(streamerWalletAddress: string): Promise<Advertisement | null> {
   const admin = createSupabaseAdminClient()
-  const { data, error } = await admin
-    .from("advertisements")
-    .select("file_path, file_type, file_name")
-    .eq("streamer_wallet_address", streamerWalletAddress)
-    .eq("is_active", true)
-    .single()
 
-  if (error && error.code !== "PGRST116") {
-    console.error("Error fetching streamer ad:", error)
+  try {
+    const { data, error } = await admin
+      .from("advertisements")
+      .select("file_path, file_type, file_name")
+      .eq("streamer_wallet_address", streamerWalletAddress)
+      .eq("is_active", true)
+      .single()
+
+    if (error && error.code !== "PGRST116") {
+      console.error("Error fetching streamer ad:", error)
+      return null
+    }
+
+    if (!data) return null
+
+    return {
+      filePath: data.file_path,
+      fileType: data.file_type as "mp4" | "gif" | "image",
+      fileName: data.file_name,
+    }
+  } catch (error) {
+    console.error("Error in getStreamerAd:", error)
     return null
-  }
-
-  if (!data) return null
-
-  return {
-    filePath: data.file_path,
-    fileType: data.file_type as "mp4" | "gif" | "image",
-    fileName: data.file_name,
   }
 }
 
@@ -663,19 +669,20 @@ export async function uploadCustomAd(
     return { success: false, error: "File size cannot exceed 50MB." }
   }
 
-  const fileType = adFile.type.startsWith("video/")
-    ? "mp4"
-    : adFile.type === "image/gif"
-      ? "gif"
-      : adFile.type.startsWith("image/")
-        ? "image"
-        : null
-
-  if (!fileType) {
+  // Map file types to database enum values
+  let fileType: string
+  if (adFile.type.startsWith("video/")) {
+    fileType = "video" // Changed from "mp4" to "video"
+  } else if (adFile.type === "image/gif") {
+    fileType = "gif"
+  } else if (adFile.type.startsWith("image/")) {
+    fileType = "image"
+  } else {
     return { success: false, error: "Invalid file type. Please upload an MP4, GIF, PNG, or JPG." }
   }
 
   try {
+    // Delete existing ad if it exists
     const { data: existingAd } = await admin
       .from("advertisements")
       .select("file_path")
@@ -683,26 +690,36 @@ export async function uploadCustomAd(
       .single()
 
     if (existingAd?.file_path) {
-      await del(existingAd.file_path)
+      try {
+        await del(existingAd.file_path)
+      } catch (deleteError) {
+        console.warn("Failed to delete existing ad file:", deleteError)
+      }
     }
 
+    // Upload new file
     const blob = await put(`ads/${streamerWallet}/${adFile.name}`, adFile, {
       access: "public",
       contentType: adFile.type,
+      allowOverwrite: true, // Add this line to allow overwriting existing files
     })
 
+    // Save to database
     const { error: dbError } = await admin.from("advertisements").upsert(
       {
         streamer_wallet_address: streamerWallet,
         file_path: blob.url,
-        file_type: fileType,
+        file_type: fileType, // Use the mapped file type
         file_name: adFile.name,
         is_active: true,
       },
       { onConflict: "streamer_wallet_address" },
     )
 
-    if (dbError) throw dbError
+    if (dbError) {
+      console.error("Database error:", dbError)
+      throw dbError
+    }
 
     revalidatePath("/dashboard")
     return { success: true, message: "Custom advertisement uploaded successfully!" }
@@ -727,7 +744,11 @@ export async function deleteCustomAd(
     if (fetchError && fetchError.code !== "PGRST116") throw fetchError
 
     if (ad?.file_path) {
-      await del(ad.file_path)
+      try {
+        await del(ad.file_path)
+      } catch (deleteError) {
+        console.warn("Failed to delete ad file from blob storage:", deleteError)
+      }
     }
 
     const { error: deleteError } = await admin
