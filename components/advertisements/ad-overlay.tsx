@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from "react"
 
 const VIDEO_AD_DURATION_MS = 15000 // 15 seconds
 const IMAGE_AD_DURATION_MS = 10000 // 10 seconds
-const DEFAULT_AD_PATH = "/ads/default-ad.mp4"
+const DEFAULT_AD_PATH = "/ads/default-ad.png"
 
 type AdData = {
   filePath: string
@@ -29,18 +29,30 @@ export function AdOverlay({ customAd }: AdOverlayProps) {
       let nextAdMinute: number
       let adToPlay: { src: string; type: "mp4" | "gif" | "image" }
 
-      // Determine which ad to play and when
-      if (customAd && [0, 20, 40].includes(minutes)) {
+      // Ad times are always: 0, 15, 30, 45 minutes past the hour
+      const adTimes = [0, 15, 30, 45]
+
+      // Check if we're at an ad time
+      if (adTimes.includes(minutes)) {
         nextAdMinute = minutes
-        adToPlay = { src: customAd.filePath, type: customAd.fileType }
-      } else if ([15, 30, 45].includes(minutes)) {
-        nextAdMinute = minutes
-        adToPlay = { src: DEFAULT_AD_PATH, type: "mp4" }
+
+        if (customAd) {
+          // If custom ad exists:
+          // - 15th minute: default ad
+          // - 0, 30, 45 minutes: custom ad
+          if (minutes === 15) {
+            adToPlay = { src: DEFAULT_AD_PATH, type: "image" }
+          } else {
+            adToPlay = { src: customAd.filePath, type: customAd.fileType }
+          }
+        } else {
+          // If no custom ad: default ad plays at all times (0, 15, 30, 45)
+          adToPlay = { src: DEFAULT_AD_PATH, type: "image" }
+        }
       } else {
-        // Find the next scheduled ad time
-        const intervals = customAd ? [0, 15, 20, 30, 40, 45] : [0, 15, 30, 45]
-        const nextInterval = intervals.find((interval) => interval > minutes) ?? intervals[0] + 60
-        const minutesUntilNextAd = nextInterval - minutes
+        // Find the next ad time
+        const nextInterval = adTimes.find((time) => time > minutes) ?? adTimes[0] + 60
+        const minutesUntilNextAd = nextInterval > 60 ? nextInterval - 60 - minutes : nextInterval - minutes
         const delay = (minutesUntilNextAd * 60 - seconds) * 1000
 
         if (timerRef.current) clearTimeout(timerRef.current)
@@ -51,10 +63,9 @@ export function AdOverlay({ customAd }: AdOverlayProps) {
       // Check if we are in the first second of the target minute to avoid re-triggering
       if (seconds > 1) {
         // Reschedule for the next interval
-        const intervals = customAd ? [0, 15, 20, 30, 40, 45] : [0, 15, 30, 45]
-        const currentIntervalIndex = intervals.indexOf(nextAdMinute)
-        const nextInterval = intervals[currentIntervalIndex + 1] ?? intervals[0] + 60
-        const minutesUntilNextAd = nextInterval - minutes
+        const currentIntervalIndex = adTimes.indexOf(nextAdMinute)
+        const nextInterval = adTimes[currentIntervalIndex + 1] ?? adTimes[0] + 60
+        const minutesUntilNextAd = nextInterval > 60 ? nextInterval - 60 - minutes : nextInterval - minutes
         const delay = (minutesUntilNextAd * 60 - seconds) * 1000
 
         if (timerRef.current) clearTimeout(timerRef.current)
@@ -66,7 +77,8 @@ export function AdOverlay({ customAd }: AdOverlayProps) {
       setCurrentAd(adToPlay)
       setIsAdPlaying(true)
 
-      const adDuration = adToPlay.type === "image" ? IMAGE_AD_DURATION_MS : VIDEO_AD_DURATION_MS
+      const adDuration =
+        adToPlay.type === "image" || adToPlay.type === "gif" ? IMAGE_AD_DURATION_MS : VIDEO_AD_DURATION_MS
 
       // Hide the ad after its duration
       setTimeout(() => {
