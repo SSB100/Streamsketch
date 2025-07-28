@@ -9,7 +9,6 @@ import { PurchaseCredits } from "@/components/dashboard/purchase-credits"
 import { SessionManager } from "@/components/dashboard/session-manager"
 import { TransactionHistory } from "@/components/dashboard/transaction-history"
 import { ProfileManager } from "@/components/dashboard/profile-manager"
-import { RevenueManager } from "@/components/dashboard/revenue-manager"
 import { getUserData, getUserSessions, getUserFreeCreditSessions, getStreamerAd } from "@/app/actions"
 import { Skeleton } from "@/components/ui/skeleton"
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui"
@@ -60,7 +59,6 @@ function DashboardSkeleton() {
       </div>
       <Skeleton className="h-[160px] w-full" /> {/* Placeholder for Free Credits Display */}
       <Skeleton className="h-[120px] w-full" /> {/* Profile Manager */}
-      <Skeleton className="h-[200px] w-full" /> {/* Revenue Manager */}
       <Skeleton className="h-[280px] w-full" /> {/* Reward Manager */}
       <Skeleton className="h-[300px] w-full" /> {/* Purchase Credits */}
       <Skeleton className="h-[400px] w-full" /> {/* Session Manager */}
@@ -213,11 +211,6 @@ function DashboardContent() {
       />
       <FreeCreditsDisplay freeCreditSessions={freeCreditSessions} />
       <ProfileManager initialUsername={userData.username} />
-      <RevenueManager
-        unclaimedSol={userData.unclaimedSol}
-        totalClaimedSol={userData.totalClaimedSol}
-        onClaimSuccess={refreshAllData}
-      />
       <RewardManager
         linesGifted={userData.linesGifted}
         nukesGifted={userData.nukesGifted}
