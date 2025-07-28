@@ -5,7 +5,12 @@ import { useState, useEffect, useRef, useCallback } from "react"
 import { Maximize, Minimize } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
-export function FullscreenWrapper({ children }: { children: React.ReactNode }) {
+interface FullscreenWrapperProps {
+  children: React.ReactNode
+  sessionCode?: string
+}
+
+export function FullscreenWrapper({ children, sessionCode }: FullscreenWrapperProps) {
   const [isFullScreen, setIsFullScreen] = useState(false)
   const wrapperRef = useRef<HTMLDivElement>(null)
 
@@ -35,8 +40,18 @@ export function FullscreenWrapper({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div ref={wrapperRef} className="relative flex h-screen w-screen items-center justify-center bg-deep-space">
+    <div ref={wrapperRef} className="relative flex h-screen w-screen items-center justify-center bg-black">
       {children}
+      {sessionCode && (
+        <div
+          className={`absolute top-4 left-1/2 -translate-x-1/2 z-50 transition-opacity duration-300 ${isFullScreen ? "opacity-100" : "opacity-0 pointer-events-none"}`}
+        >
+          <div className="bg-black/60 text-white/90 backdrop-blur-md rounded-lg px-6 py-3">
+            <p className="text-sm uppercase tracking-widest text-white/50">Join at streamsketch.com</p>
+            <p className="text-center font-mono text-4xl font-bold tracking-wider">{sessionCode}</p>
+          </div>
+        </div>
+      )}
       <div className="absolute right-4 bottom-4 z-20">
         <Button
           onClick={toggleFullScreen}

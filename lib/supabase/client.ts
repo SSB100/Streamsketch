@@ -36,3 +36,10 @@ export function getSupabaseBrowserClient(): SupabaseClient {
 
   return browserClient
 }
+
+/**
+ * Alternative export name for compatibility
+ */
+export function createSupabaseClient(): SupabaseClient {
+  return getSupabaseBrowserClient()
+}

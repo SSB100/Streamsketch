@@ -8,9 +8,7 @@ export default async function SessionViewPage({ params }: { params: { code: stri
 
   if (!session) {
     return (
-      <div className="flex h-screen w-full items-center justify-center bg-deep-space text-white">
-        Session not found.
-      </div>
+      <div className="flex h-screen w-full items-center justify-center bg-black text-white">Session not found.</div>
     )
   }
 
@@ -22,7 +20,7 @@ export default async function SessionViewPage({ params }: { params: { code: stri
   }
 
   return (
-    <FullscreenWrapper>
+    <FullscreenWrapper sessionCode={params.code}>
       <SessionView initialSession={session} initialDrawings={drawings} customAd={customAd} sessionCode={params.code} />
     </FullscreenWrapper>
   )
