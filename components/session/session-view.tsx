@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react"
 import type { Drawing, Advertisement } from "@/lib/types"
-import { Canvas, type CanvasHandle } from "@/components/whiteboard/canvas"
+import { DynamicCanvas, type DynamicCanvasHandle } from "@/components/whiteboard/dynamic-canvas"
 import { NukeAnimationOverlay } from "@/components/whiteboard/nuke-animation-overlay"
 import { AdOverlay } from "@/components/advertisements/ad-overlay"
 import { useRealtimeChannel, type ConnectionStatus } from "@/hooks/use-realtime-channel"
@@ -24,7 +24,7 @@ function SessionViewContent({ initialSession, initialDrawings, customAd, session
   const [drawings, setDrawings] = useState<Drawing[]>(initialDrawings)
   const [nukeEvent, setNukeEvent] = useState<{ username: string | null; animationId: string } | null>(null)
 
-  const canvasRef = useRef<CanvasHandle>(null)
+  const canvasRef = useRef<DynamicCanvasHandle>(null)
   const previousConnectionStatus = useRef<ConnectionStatus>("connected")
 
   const handleIncomingDraw = useCallback(({ drawing }: { drawing: Drawing }) => {
@@ -91,7 +91,7 @@ function SessionViewContent({ initialSession, initialDrawings, customAd, session
         </Button>
       </div>
       <div className="w-full h-full flex items-center justify-center">
-        <Canvas ref={canvasRef} isDrawable={false} initialDrawings={drawings} className="border-2 border-white/20" />
+        <DynamicCanvas ref={canvasRef} initialDrawings={drawings} className="border-2 border-white/20" />
       </div>
     </div>
   )
