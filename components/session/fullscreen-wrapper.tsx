@@ -47,7 +47,6 @@ export function FullscreenWrapper({ children, sessionCode }: FullscreenWrapperPr
           className={`absolute top-4 left-1/2 -translate-x-1/2 z-50 transition-opacity duration-300 ${isFullScreen ? "opacity-100" : "opacity-0 pointer-events-none"}`}
         >
           <div className="bg-black/60 text-white/90 backdrop-blur-md rounded-lg px-6 py-3">
-            <p className="text-sm uppercase tracking-widest text-white/50">Join at streamsketch.com</p>
             <p className="text-center font-mono text-4xl font-bold tracking-wider">{sessionCode}</p>
           </div>
         </div>

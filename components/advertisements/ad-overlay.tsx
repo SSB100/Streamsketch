@@ -1,16 +1,16 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
-import { Volume2, VolumeX } from "lucide-react"
+import { useState, useEffect, useCallback } from "react"
+import { X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import type { Advertisement } from "@/lib/types"
 
 interface AdOverlayProps {
-  customAd: Advertisement | null
+  customAd?: Advertisement | null
 }
 
-const AD_SLOTS = [0, 15, 30, 45]
-const DEFAULT_AD_SLOT = 15
+const AD_SLOTS = [0, 15, 30, 45] // Minutes when ads can show
+const DEFAULT_AD_SLOT = 15 // Default ad shows at 15-minute mark when custom ad exists
 
 const DEFAULT_AD: Advertisement = {
   filePath: "/ads/default-ad-image.png",
@@ -21,128 +21,111 @@ const DEFAULT_AD: Advertisement = {
 export function AdOverlay({ customAd }: AdOverlayProps) {
   const [showAd, setShowAd] = useState(false)
   const [currentAd, setCurrentAd] = useState<Advertisement | null>(null)
-  const [isMuted, setIsMuted] = useState(true)
-  const intervalRef = useRef<NodeJS.Timeout | null>(null)
-  const adTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const [countdown, setCountdown] = useState(0)
+
+  const shouldShowAd = useCallback((currentMinute: number): boolean => {
+    return AD_SLOTS.includes(currentMinute)
+  }, [])
+
+  const getAdForSlot = useCallback(
+    (currentMinute: number): Advertisement => {
+      // If no custom ad exists, always show default ad
+      if (!customAd) {
+        return DEFAULT_AD
+      }
+
+      // If custom ad exists, show default ad only at the 15-minute slot
+      if (currentMinute === DEFAULT_AD_SLOT) {
+        return DEFAULT_AD
+      }
+
+      // Otherwise show custom ad
+      return customAd
+    },
+    [customAd],
+  )
+
+  const closeAd = useCallback(() => {
+    setShowAd(false)
+    setCurrentAd(null)
+    setCountdown(0)
+  }, [])
 
   useEffect(() => {
     const checkAdSchedule = () => {
       const now = new Date()
-      const minutes = now.getMinutes()
+      const currentMinute = now.getMinutes()
+      const currentSecond = now.getSeconds()
 
-      if (AD_SLOTS.includes(minutes)) {
-        let adToPlay: Advertisement = DEFAULT_AD
-
-        // If no custom ad exists, show default ad at all slots
-        // If custom ad exists, show default ad only at the 15-minute slot
-        if (customAd && minutes !== DEFAULT_AD_SLOT) {
-          adToPlay = customAd
-        } else {
-          adToPlay = DEFAULT_AD
-        }
-
-        setCurrentAd(adToPlay)
+      // Show ad at the start of designated minutes (0-2 seconds)
+      if (shouldShowAd(currentMinute) && currentSecond <= 2) {
+        const adToShow = getAdForSlot(currentMinute)
+        setCurrentAd(adToShow)
         setShowAd(true)
 
-        // Set auto-close timer for image ads (15 seconds)
-        if (adToPlay.fileType === "image") {
-          adTimeoutRef.current = setTimeout(() => {
-            handleAdEnd()
-          }, 15000) // 15 seconds
+        // Set countdown for image ads (15 seconds)
+        if (adToShow.fileType === "image") {
+          setCountdown(15)
         }
-      } else {
-        setShowAd(false)
-        setCurrentAd(null)
       }
     }
 
-    const scheduleNextCheck = () => {
-      const now = new Date()
-      const seconds = now.getSeconds()
-      const milliseconds = now.getMilliseconds()
-      const msUntilNextMinute = (60 - seconds) * 1000 - milliseconds
+    // Check every second
+    const interval = setInterval(checkAdSchedule, 1000)
+    return () => clearInterval(interval)
+  }, [shouldShowAd, getAdForSlot])
 
-      setTimeout(() => {
-        checkAdSchedule()
-        if (intervalRef.current) clearInterval(intervalRef.current)
-        intervalRef.current = setInterval(checkAdSchedule, 60000)
-      }, msUntilNextMinute)
+  // Countdown timer for image ads
+  useEffect(() => {
+    if (countdown > 0) {
+      const timer = setTimeout(() => {
+        setCountdown(countdown - 1)
+      }, 1000)
+      return () => clearTimeout(timer)
+    } else if (countdown === 0 && showAd && currentAd?.fileType === "image") {
+      // Auto-close image ads after countdown
+      closeAd()
     }
-
-    scheduleNextCheck()
-
-    return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current)
-      }
-      if (adTimeoutRef.current) {
-        clearTimeout(adTimeoutRef.current)
-      }
-    }
-  }, [customAd])
-
-  const handleAdEnd = () => {
-    setShowAd(false)
-    setCurrentAd(null)
-    if (adTimeoutRef.current) {
-      clearTimeout(adTimeoutRef.current)
-      adTimeoutRef.current = null
-    }
-  }
-
-  const toggleMute = () => {
-    setIsMuted(!isMuted)
-  }
+  }, [countdown, showAd, currentAd, closeAd])
 
   if (!showAd || !currentAd) return null
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
-      <div className="relative w-full max-w-4xl mx-4">
-        <div className="relative overflow-hidden bg-black rounded-lg">
-          {currentAd.fileType === "video" ? (
-            <>
-              <video
-                key={currentAd.filePath}
-                src={currentAd.filePath || "/placeholder.svg"}
-                autoPlay
-                muted={isMuted}
-                onEnded={handleAdEnd}
-                className="object-contain w-full h-auto max-h-[80vh]"
-                controls={false}
-                playsInline
-              />
-              <Button
-                onClick={toggleMute}
-                variant="ghost"
-                size="icon"
-                className="absolute bottom-4 right-4 text-white bg-black/50 hover:bg-black/70"
-              >
-                {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
-              </Button>
-            </>
-          ) : (
-            <div className="relative">
-              <img
-                src={currentAd.filePath || "/placeholder.svg"}
-                alt="Advertisement"
-                className="object-contain w-full h-auto max-h-[80vh]"
-              />
-              {/* Show countdown for image ads */}
-              <div className="absolute bottom-4 left-4 text-white bg-black/50 px-2 py-1 rounded text-sm">
-                {currentAd.fileType === "image" && "15s"}
-              </div>
-            </div>
-          )}
+      <div className="relative max-h-[90vh] max-w-[90vw] overflow-hidden rounded-lg bg-black shadow-2xl">
+        {/* Close button */}
+        <Button
+          onClick={closeAd}
+          variant="ghost"
+          size="icon"
+          className="absolute right-2 top-2 z-10 h-8 w-8 rounded-full bg-black/50 text-white hover:bg-black/70"
+        >
+          <X className="h-4 w-4" />
+        </Button>
 
-          <Button
-            onClick={handleAdEnd}
-            variant="ghost"
-            className="absolute top-4 right-4 text-white bg-black/50 hover:bg-black/70"
-          >
-            Skip Ad
-          </Button>
-        </div>
+        {/* Countdown indicator for images */}
+        {currentAd.fileType === "image" && countdown > 0 && (
+          <div className="absolute left-2 top-2 z-10 rounded-full bg-black/50 px-2 py-1 text-xs text-white">
+            {countdown}s
+          </div>
+        )}
+
+        {/* Ad content */}
+        {currentAd.fileType === "video" ? (
+          <video
+            src={currentAd.filePath}
+            autoPlay
+            muted
+            onEnded={closeAd}
+            className="max-h-[90vh] max-w-[90vw] object-contain"
+          />
+        ) : (
+          <img
+            src={currentAd.filePath || "/placeholder.svg"}
+            alt="Advertisement"
+            className="max-h-[90vh] max-w-[90vw] object-contain"
+          />
+        )}
       </div>
     </div>
   )
