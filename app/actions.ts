@@ -753,3 +753,14 @@ export async function deleteCustomAd(
     return { success: false, error: getErrorMessage(error) }
   }
 }
+
+export async function getSessionRevenueLedger(sessionId: string) {
+  const admin = createSupabaseAdminClient()
+  const { data, error } = await admin
+    .from("session_revenue_ledger")
+    .select("id, session_id, streamer_wallet_address, user_wallet_address, revenue_type, source, gross_sol, streamer_share_sol, transaction_id, drawing_id, created_at")
+    .eq("session_id", sessionId)
+    .order("created_at", { ascending: true })
+  if (error) throw new Error(error.message)
+  return data || []
+}
