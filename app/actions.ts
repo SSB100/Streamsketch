@@ -111,20 +111,8 @@ export async function getUserData(walletAddress: string) {
       console.error("[StreamSketch] Error getting revenue data:", revenueError.message)
       throw revenueError
     }
-    let giftingData = { lines_gifted: 0, nukes_gifted: 0 }
-    try {
-      const { data: giftingResult, error: giftingError } = await admin
-        .rpc("get_gifting_limits", { p_streamer_wallet_address: walletAddress })
-        .single()
-      if (!giftingError && giftingResult) {
-        giftingData = {
-          lines_gifted: giftingResult.lines_gifted ?? 0,
-          nukes_gifted: giftingResult.nukes_gifted ?? 0,
-        }
-      }
-    } catch (err: any) {
-      console.warn("[StreamSketch] Error fetching gifting limits, using defaults:", err?.message ?? err)
-    }
+    // Unlimited free gifting: keep return shape but no longer fetch or track weekly totals
+    const giftingData = { lines_gifted: 0, nukes_gifted: 0 }
     const { totalFreeLines, totalFreeNukes } = await getFreeCreditsTotal(admin, walletAddress)
     return {
       lineCredits: (userData.line_credits_standard || 0) + (userData.line_credits_discounted || 0),

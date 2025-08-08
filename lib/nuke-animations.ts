@@ -1,61 +1,98 @@
+/**
+ * Nuke animations catalog and pricing.
+ * New pricing:
+ *  - Default nuke: 0.01 SOL
+ *  - Custom/premium nukes: 0.02 SOL
+ *  - Free nuke: 0 SOL (consumes a free nuke credit)
+ *
+ * Video/preview assets referenced from /public.
+ */
+
+import { CUSTOM_NUKE_PRICE_SOL, DEFAULT_NUKE_PRICE_SOL } from "./constants"
+
 export type NukeAnimation = {
-  id: string
+  id:
+    | "free_nuke"
+    | "default"
+    | "vortex"
+    | "cosmic_blast"
+    | "rug_pull"
+    | "pete_nuke"
+    | "spirit_bomb"
+    | "jericho"
+    | "rip_loki"
   name: string
-  preview: string
+  price: number // SOL
+  // Preview image or GIF (for selection UI)
+  preview?: string
+  // Optional video path for the overlay playback
   video?: string
-  price: number // Added price property
 }
 
-export const NUKE_ANIMATIONS: Record<string, NukeAnimation> = {
+const FREE_PRICE = 0
+
+export const NUKE_ANIMATIONS: Record<NukeAnimation["id"], NukeAnimation> = {
   free_nuke: {
     id: "free_nuke",
-    name: "Free Cosmic Blast",
-    preview: "/previews/cosmic-blast.png",
-    video: "https://hfjgo1ukrjb6miiq.public.blob.vercel-storage.com/Stream%20Sketch/Untitled%20video%20%2817%29-VXKGi2kslJjCYf8YIDk8dDqiIEX08M.mp4",
-    price: 0,
+    name: "Free Nuke",
+    price: FREE_PRICE,
+    preview: "/previews/default-nuke.gif",
   },
   default: {
     id: "default",
+    name: "Default Nuke",
+    price: DEFAULT_NUKE_PRICE_SOL, // 0.01
+    preview: "/previews/default-nuke.gif",
+    // Default effect may be procedural; if you have a video, add it here:
+    // video: "/nukes/default-nuke.mp4",
+  },
+  vortex: {
+    id: "vortex",
+    name: "Vortex",
+    price: CUSTOM_NUKE_PRICE_SOL, // 0.02
+    preview: "/previews/vortex-nuke.gif",
+    video: "/nukes/vortex.mp4",
+  },
+  cosmic_blast: {
+    id: "cosmic_blast",
     name: "Cosmic Blast",
+    price: CUSTOM_NUKE_PRICE_SOL,
     preview: "/previews/cosmic-blast.png",
     video: "https://hfjgo1ukrjb6miiq.public.blob.vercel-storage.com/Stream%20Sketch/Untitled%20video%20%2817%29-VXKGi2kslJjCYf8YIDk8dDqiIEX08M.mp4",
-    price: 0.02,
   },
   rug_pull: {
     id: "rug_pull",
-    name: "Rug Pull Nuke",
+    name: "Rug Pull",
+    price: CUSTOM_NUKE_PRICE_SOL,
     preview: "/previews/rug-pull.png",
     video: "https://hfjgo1ukrjb6miiq.public.blob.vercel-storage.com/Stream%20Sketch/Untitled%20video%20%2819%29-0dqGkRvX5b7pfZeFbsanw429CFl9Vq.mp4",
-    price: 0.03,
   },
   pete_nuke: {
     id: "pete_nuke",
-    name: "$PETE Nuke",
+    name: "Pete Nuke",
+    price: CUSTOM_NUKE_PRICE_SOL,
     preview: "/previews/pete-nuke.png",
-    video:
-      "https://hfjgo1ukrjb6miiq.public.blob.vercel-storage.com/Stream%20Sketch/Untitled%20video%20%2821%29-iXLTzuZd09onb9o0wUvIzyOhkefjbm.mp4",
-    price: 0.03,
+    video: "/nukes/pete-nuke.mp4",
   },
   spirit_bomb: {
     id: "spirit_bomb",
-    name: "SPIRIT BOMB",
+    name: "Spirit Bomb",
+    price: CUSTOM_NUKE_PRICE_SOL,
     preview: "/previews/spirit-bomb.png",
-    video:
-      "https://hfjgo1ukrjb6miiq.public.blob.vercel-storage.com/Stream%20Sketch/Untitled%20video%20%2823%29-jblueUo9KzGlGWjJzsGKjF7D5ws7So.mp4",
-    price: 0.03,
+    video: "/nukes/spirit-bomb.mp4",
   },
   jericho: {
     id: "jericho",
-    name: "The Jericho",
+    name: "Jericho",
+    price: CUSTOM_NUKE_PRICE_SOL,
     preview: "/previews/jericho.png",
     video: "https://hfjgo1ukrjb6miiq.public.blob.vercel-storage.com/Stream%20Sketch/Untitled%20video%20%2825%29-24XyOArI1bMNzUbxrCyASrZEqdONLq.mp4",
-    price: 0.03,
   },
   rip_loki: {
     id: "rip_loki",
-    name: "RIP LOKI",
+    name: "RIP Loki",
+    price: CUSTOM_NUKE_PRICE_SOL,
     preview: "/previews/rip-loki.png",
     video: "https://hfjgo1ukrjb6miiq.public.blob.vercel-storage.com/Stream%20Sketch/Untitled%20video%20%2824%29-1nfwafYqQvoYnkog0y84dXGhYnKPWv.mp4",
-    price: 0.03,
   },
 }
