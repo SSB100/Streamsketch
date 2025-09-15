@@ -6,82 +6,60 @@ BEGIN;
 
 -- 1) Handle legacy column "total_claimed"
 DO $$
-DECLARE
-  has_total_claimed boolean;
-  has_total_claimed_sol boolean;
 BEGIN
-  SELECT EXISTS (
-    SELECT 1 FROM information_schema.columns
-    WHERE table_schema = 'public' AND table_name = 'revenue' AND column_name = 'total_claimed'
-  ) INTO has_total_claimed;
+    -- If total_claimed exists but total_claimed_sol doesn't, rename it
+    IF EXISTS (SELECT 1 FROM information_schema.columns 
+               WHERE table_name = 'revenue' AND column_name = 'total_claimed' 
+               AND table_schema = 'public') 
+    AND NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                    WHERE table_name = 'revenue' AND column_name = 'total_claimed_sol' 
+                    AND table_schema = 'public') THEN
+        ALTER TABLE revenue RENAME COLUMN total_claimed TO total_claimed_sol;
+        RAISE NOTICE 'Renamed total_claimed to total_claimed_sol';
+    END IF;
 
-  SELECT EXISTS (
-    SELECT 1 FROM information_schema.columns
-    WHERE table_schema = 'public' AND table_name = 'revenue' AND column_name = 'total_claimed_sol'
-  ) INTO has_total_claimed_sol;
-
-  IF has_total_claimed AND has_total_claimed_sol THEN
-    -- Merge legacy values into total_claimed_sol, then drop legacy column
-    EXECUTE 'UPDATE public.revenue SET total_claimed_sol = COALESCE(total_claimed_sol,0) + COALESCE(total_claimed,0)';
-    EXECUTE 'ALTER TABLE public.revenue DROP COLUMN IF EXISTS total_claimed';
-  ELSIF has_total_claimed AND NOT has_total_claimed_sol THEN
-    -- Rename legacy column to the canonical name
-    EXECUTE 'ALTER TABLE public.revenue RENAME COLUMN total_claimed TO total_claimed_sol';
-  END IF;
-END
-$$;
+    -- If both exist, merge total_claimed into total_claimed_sol and drop total_claimed
+    IF EXISTS (SELECT 1 FROM information_schema.columns 
+               WHERE table_name = 'revenue' AND column_name = 'total_claimed' 
+               AND table_schema = 'public') 
+    AND EXISTS (SELECT 1 FROM information_schema.columns 
+                WHERE table_name = 'revenue' AND column_name = 'total_claimed_sol' 
+                AND table_schema = 'public') THEN
+        -- Merge values (assuming total_claimed was in lamports, convert to SOL)
+        UPDATE revenue 
+        SET total_claimed_sol = COALESCE(total_claimed_sol, 0) + COALESCE(total_claimed / 1000000000.0, 0)
+        WHERE total_claimed IS NOT NULL AND total_claimed > 0;
+        
+        -- Drop the legacy column
+        ALTER TABLE revenue DROP COLUMN total_claimed;
+        RAISE NOTICE 'Merged total_claimed into total_claimed_sol and dropped legacy column';
+    END IF;
+END $$;
 
 -- 2) Ensure total_revenue column exists
-DO $$
-DECLARE
-  has_total_revenue boolean;
-BEGIN
-  SELECT EXISTS (
-    SELECT 1 FROM information_schema.columns
-    WHERE table_schema = 'public' AND table_name = 'revenue' AND column_name = 'total_revenue'
-  ) INTO has_total_revenue;
-
-  IF NOT has_total_revenue THEN
-    EXECUTE 'ALTER TABLE public.revenue ADD COLUMN total_revenue numeric';
-  END IF;
-END
-$$;
+ALTER TABLE revenue 
+ADD COLUMN IF NOT EXISTS total_revenue DECIMAL(20, 9) DEFAULT 0;
 
 -- 3) Create or replace trigger function to keep total_revenue in sync
-CREATE OR REPLACE FUNCTION public.revenue_total_sync()
-RETURNS trigger
-LANGUAGE plpgsql
-AS $fn$
+CREATE OR REPLACE FUNCTION sync_total_revenue()
+RETURNS TRIGGER AS $$
 BEGIN
-  NEW.total_revenue := COALESCE(NEW.unclaimed_sol, 0)::numeric + COALESCE(NEW.total_claimed_sol, 0)::numeric;
-  RETURN NEW;
+    NEW.total_revenue = COALESCE(NEW.unclaimed_sol, 0) + COALESCE(NEW.total_claimed_sol, 0);
+    RETURN NEW;
 END;
-$fn$;
+$$ LANGUAGE plpgsql;
 
 -- 4) Ensure trigger exists and fires before insert/update of relevant columns
-DO $$
-BEGIN
-  IF EXISTS (
-    SELECT 1 FROM pg_trigger
-    WHERE tgname = 'trg_revenue_total_sync'
-      AND tgrelid = 'public.revenue'::regclass
-  ) THEN
-    -- Drop and recreate to ensure correct definition
-    EXECUTE 'DROP TRIGGER trg_revenue_total_sync ON public.revenue';
-  END IF;
-
-  EXECUTE '
-    CREATE TRIGGER trg_revenue_total_sync
-    BEFORE INSERT OR UPDATE OF unclaimed_sol, total_claimed_sol
-    ON public.revenue
+DROP TRIGGER IF EXISTS sync_total_revenue_trigger ON revenue;
+CREATE TRIGGER sync_total_revenue_trigger
+    BEFORE INSERT OR UPDATE ON revenue
     FOR EACH ROW
-    EXECUTE FUNCTION public.revenue_total_sync()
-  ';
-END
-$$;
+    EXECUTE FUNCTION sync_total_revenue();
 
 -- 5) Backfill total_revenue for existing rows
-UPDATE public.revenue
-SET total_revenue = COALESCE(unclaimed_sol, 0)::numeric + COALESCE(total_claimed_sol, 0)::numeric;
+UPDATE revenue 
+SET total_revenue = COALESCE(unclaimed_sol, 0) + COALESCE(total_claimed_sol, 0)
+WHERE total_revenue != COALESCE(unclaimed_sol, 0) + COALESCE(total_claimed_sol, 0)
+   OR total_revenue IS NULL;
 
 COMMIT;

@@ -40,7 +40,7 @@ export const metadata: Metadata = {
     description: "Collaborative canvas for streamers on Solana.",
     images: ["/banner.png"], // Resolves to https://streamsketch.tech/banner.png
   },
-    generator: 'v0.dev'
+    generator: 'v0.app'
 }
 
 export default function RootLayout({

@@ -43,11 +43,14 @@ export function FullscreenWrapper({ children, sessionCode }: FullscreenWrapperPr
     <div ref={wrapperRef} className="relative flex h-screen w-screen items-center justify-center bg-black">
       {children}
       {sessionCode && (
-        <div
-          className={`absolute top-4 left-1/2 -translate-x-1/2 z-50 transition-opacity duration-300 ${isFullScreen ? "opacity-100" : "opacity-0 pointer-events-none"}`}
-        >
-          <div className="bg-black/60 text-white/90 backdrop-blur-md rounded-lg px-6 py-3">
-            <p className="text-center font-mono text-4xl font-bold tracking-wider">{sessionCode}</p>
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50">
+          <div className="bg-black/60 text-white/90 backdrop-blur-md rounded-lg px-6 py-3 text-center">
+            <p className="text-sm text-white/70 mb-1">Visit streamsketch.tech and enter</p>
+            <p className="font-mono text-2xl font-bold tracking-wider text-green-400">
+              {"★ "}
+              {sessionCode}
+              {" ★"}
+            </p>
           </div>
         </div>
       )}
