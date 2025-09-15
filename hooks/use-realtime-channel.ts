@@ -21,18 +21,17 @@ type UseRealtimeChannelOptions = {
 
 export type ConnectionStatus = "connected" | "reconnecting" | "disconnected"
 
-function sleep(ms: number) {
-  return new Promise((res) => setTimeout(res, ms))
-}
-
 export function useRealtimeChannel(sessionId: string | null, options: UseRealtimeChannelOptions) {
   const supabase = useSupabase()
   const channelRef = useRef<RealtimeChannel | null>(null)
   const optionsRef = useRef(options)
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("connected")
 
-  // exponential backoff state
-  const backoffRef = useRef<{ attempt: number; timer: number | null }>({ attempt: 0, timer: null })
+  // Prevent infinite recursion
+  const isReconnectingRef = useRef(false)
+  const reconnectTimeoutRef = useRef<number | null>(null)
+  const backoffAttemptRef = useRef(0)
+  const maxReconnectAttempts = 5
 
   useEffect(() => {
     optionsRef.current = options
@@ -40,156 +39,179 @@ export function useRealtimeChannel(sessionId: string | null, options: UseRealtim
 
   const channelId = useMemo(() => (sessionId ? `session-${sessionId}` : null), [sessionId])
 
-  const clearBackoffTimer = () => {
-    if (backoffRef.current.timer) {
-      window.clearTimeout(backoffRef.current.timer)
-      backoffRef.current.timer = null
+  const clearReconnectTimeout = useCallback(() => {
+    if (reconnectTimeoutRef.current) {
+      window.clearTimeout(reconnectTimeoutRef.current)
+      reconnectTimeoutRef.current = null
     }
-  }
+  }, [])
 
-  const resetBackoff = () => {
-    clearBackoffTimer()
-    backoffRef.current.attempt = 0
-  }
+  const resetBackoff = useCallback(() => {
+    backoffAttemptRef.current = 0
+    isReconnectingRef.current = false
+    clearReconnectTimeout()
+  }, [clearReconnectTimeout])
+
+  const cleanupChannel = useCallback(() => {
+    if (channelRef.current) {
+      try {
+        supabase.removeChannel(channelRef.current)
+      } catch (e) {
+        console.warn("[Realtime] Error removing channel:", e)
+      }
+      channelRef.current = null
+    }
+  }, [supabase])
 
   const scheduleReconnect = useCallback(
     (reason: string) => {
-      if (!channelId) return
-
-      // Ensure we tear down any existing channel before scheduling a reconnect
-      if (channelRef.current) {
-        try {
-          supabase.removeChannel(channelRef.current)
-        } catch (e) {
-          // ignore
-        }
-        channelRef.current = null
+      // Prevent infinite recursion
+      if (isReconnectingRef.current || !channelId) {
+        return
       }
 
+      // Check max attempts
+      if (backoffAttemptRef.current >= maxReconnectAttempts) {
+        console.error(`[Realtime] Max reconnect attempts (${maxReconnectAttempts}) reached. Giving up.`)
+        setConnectionStatus("disconnected")
+        return
+      }
+
+      isReconnectingRef.current = true
       setConnectionStatus("reconnecting")
-      const attempt = ++backoffRef.current.attempt
-      const delay = Math.min(30000, 1000 * Math.pow(2, attempt - 1)) // 1s, 2s, 4s, 8s, 16s, 30s cap
 
-      console.warn(`[Realtime] Scheduling reconnect (attempt ${attempt}) in ${delay}ms due to: ${reason}`)
+      const attempt = ++backoffAttemptRef.current
+      const delay = Math.min(30000, 1000 * Math.pow(2, attempt - 1))
 
-      clearBackoffTimer()
-      backoffRef.current.timer = window.setTimeout(() => {
-        if (channelId) {
+      console.warn(
+        `[Realtime] Scheduling reconnect (attempt ${attempt}/${maxReconnectAttempts}) in ${delay}ms due to: ${reason}`,
+      )
+
+      clearReconnectTimeout()
+      reconnectTimeoutRef.current = window.setTimeout(() => {
+        if (channelId && isReconnectingRef.current) {
           createAndSubscribeChannel(channelId)
         }
       }, delay)
     },
-    [channelId, supabase],
+    [channelId, clearReconnectTimeout],
   )
 
   const createAndSubscribeChannel = useCallback(
     (id: string) => {
-      // Defensive: cleanup previous channel if any
-      if (channelRef.current) {
-        try {
-          supabase.removeChannel(channelRef.current)
-        } catch {
-          // ignore
-        }
-        channelRef.current = null
-      }
+      // Clean up any existing channel
+      cleanupChannel()
 
-      // NOTE: We intentionally do NOT set broadcast.ack = true.
-      // Some Realtime deployments don't support ACK and will emit CHANNEL_ERROR.
-      const channel = supabase.channel(id)
-      channelRef.current = channel
+      try {
+        const channel = supabase.channel(id, {
+          config: {
+            broadcast: { self: false },
+          },
+        })
 
-      channel.on("broadcast", { event: "nuke" }, (evt) => {
-        try {
-          optionsRef.current.onNukeBroadcast(evt.payload)
-        } catch (err) {
-          console.error("[Realtime] onNukeBroadcast handler error:", err)
-        }
-      })
+        channelRef.current = channel
 
-      channel.on("broadcast", { event: "draw" }, (evt) => {
-        try {
-          optionsRef.current.onDrawBroadcast(evt.payload)
-        } catch (err) {
-          console.error("[Realtime] onDrawBroadcast handler error:", err)
-        }
-      })
-
-      channel.subscribe((status, err) => {
-        switch (status) {
-          case "SUBSCRIBED":
-            console.log(`[Realtime] Subscribed: ${id}`)
-            setConnectionStatus("connected")
-            resetBackoff()
-            break
-          case "CHANNEL_ERROR": {
-            const msg = (err as any)?.message || (err as any)?.toString?.() || "Unknown error"
-            console.error(`[Realtime] Channel Error: ${id} -> ${msg}`)
-            scheduleReconnect("CHANNEL_ERROR")
-            break
+        channel.on("broadcast", { event: "nuke" }, (evt) => {
+          try {
+            optionsRef.current.onNukeBroadcast(evt.payload)
+          } catch (err) {
+            console.error("[Realtime] onNukeBroadcast handler error:", err)
           }
-          case "TIMED_OUT":
-            console.warn(`[Realtime] Timed Out: ${id}. Reconnecting...`)
-            scheduleReconnect("TIMED_OUT")
-            break
-          case "CLOSED":
-            // Closed can be intentional on unmount, don't always reconnect.
-            // If we still have a channelId, we assume it was unintentional and try to reconnect.
-            console.log(`[Realtime] Channel Closed: ${id}`)
-            if (channelId) {
-              scheduleReconnect("CLOSED")
+        })
+
+        channel.on("broadcast", { event: "draw" }, (evt) => {
+          try {
+            optionsRef.current.onDrawBroadcast(evt.payload)
+          } catch (err) {
+            console.error("[Realtime] onDrawBroadcast handler error:", err)
+          }
+        })
+
+        channel.subscribe((status, err) => {
+          console.log(`[Realtime] Status change: ${status} for channel ${id}`)
+
+          switch (status) {
+            case "SUBSCRIBED":
+              console.log(`[Realtime] Successfully subscribed to: ${id}`)
+              setConnectionStatus("connected")
+              resetBackoff()
+              break
+
+            case "CHANNEL_ERROR": {
+              const msg = err?.message || err?.toString?.() || "Unknown error"
+              console.error(`[Realtime] Channel Error: ${id} -> ${msg}`)
+
+              // Only schedule reconnect if we're not already reconnecting
+              if (!isReconnectingRef.current) {
+                scheduleReconnect("CHANNEL_ERROR")
+              }
+              break
             }
-            break
+
+            case "TIMED_OUT":
+              console.warn(`[Realtime] Timed Out: ${id}`)
+              if (!isReconnectingRef.current) {
+                scheduleReconnect("TIMED_OUT")
+              }
+              break
+
+            case "CLOSED":
+              console.log(`[Realtime] Channel Closed: ${id}`)
+              // Only reconnect if we still have a channelId and we're not intentionally closing
+              if (channelId && !isReconnectingRef.current) {
+                scheduleReconnect("CLOSED")
+              }
+              break
+          }
+        })
+      } catch (error) {
+        console.error("[Realtime] Error creating channel:", error)
+        if (!isReconnectingRef.current) {
+          scheduleReconnect("CREATE_ERROR")
         }
-      })
+      }
     },
-    [channelId, scheduleReconnect, supabase],
+    [supabase, cleanupChannel, resetBackoff, scheduleReconnect, channelId],
   )
 
+  // Main effect for channel management
   useEffect(() => {
     if (!channelId) {
-      // cleanup if no channelId
-      clearBackoffTimer()
-      if (channelRef.current) {
-        try {
-          supabase.removeChannel(channelRef.current)
-        } catch {
-          // ignore
-        }
-        channelRef.current = null
-      }
+      cleanupChannel()
+      clearReconnectTimeout()
+      isReconnectingRef.current = false
       setConnectionStatus("disconnected")
       return
     }
 
-    setConnectionStatus("reconnecting") // transient while we subscribe
+    // Reset state for new channel
+    resetBackoff()
+    setConnectionStatus("reconnecting")
     createAndSubscribeChannel(channelId)
 
     return () => {
-      clearBackoffTimer()
-      if (channelRef.current) {
-        try {
-          supabase.removeChannel(channelRef.current)
-        } catch {
-          // ignore
-        }
-        channelRef.current = null
-      }
+      cleanupChannel()
+      clearReconnectTimeout()
+      isReconnectingRef.current = false
     }
-  }, [channelId, supabase, createAndSubscribeChannel])
+  }, [channelId, createAndSubscribeChannel, cleanupChannel, clearReconnectTimeout, resetBackoff])
 
   // Browser online/offline events
   useEffect(() => {
     const handleOnline = () => {
       console.log("[System] Back online.")
-      // Prompt a reconnect attempt soon if we were offline
-      if (connectionStatus !== "connected" && channelId) {
+      if (connectionStatus !== "connected" && channelId && !isReconnectingRef.current) {
+        // Reset attempts when coming back online
+        backoffAttemptRef.current = 0
         scheduleReconnect("BROWSER_ONLINE")
       }
     }
+
     const handleOffline = () => {
       console.warn("[System] Offline. Realtime connection paused.")
       setConnectionStatus("disconnected")
+      clearReconnectTimeout()
+      isReconnectingRef.current = false
     }
 
     window.addEventListener("online", handleOnline)
@@ -199,21 +221,7 @@ export function useRealtimeChannel(sessionId: string | null, options: UseRealtim
       window.removeEventListener("online", handleOnline)
       window.removeEventListener("offline", handleOffline)
     }
-  }, [channelId, connectionStatus, scheduleReconnect])
-
-  // Proactive health check: if channel silently drops, switch to reconnecting
-  useEffect(() => {
-    const interval = window.setInterval(() => {
-      const ch = channelRef.current
-      if (!ch) return
-      if ((ch.state === "closed" || ch.state === "errored") && connectionStatus === "connected") {
-        console.warn(`[Realtime Health Check] Detected stale connection (state: ${ch.state}). Forcing reconnect.`)
-        scheduleReconnect(`HEALTH_CHECK_${ch.state}`)
-      }
-    }, 15000)
-
-    return () => window.clearInterval(interval)
-  }, [connectionStatus, scheduleReconnect])
+  }, [channelId, connectionStatus, scheduleReconnect, clearReconnectTimeout])
 
   return { channel: channelRef.current, connectionStatus }
 }

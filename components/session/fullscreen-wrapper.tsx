@@ -1,70 +1,60 @@
 "use client"
 
 import type React from "react"
-import { useState, useEffect, useRef, useCallback } from "react"
+
+import { useState, useEffect } from "react"
 import { Maximize, Minimize } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
 interface FullscreenWrapperProps {
   children: React.ReactNode
-  sessionCode?: string
+  shortCode: string
 }
 
-export function FullscreenWrapper({ children, sessionCode }: FullscreenWrapperProps) {
-  const [isFullScreen, setIsFullScreen] = useState(false)
-  const wrapperRef = useRef<HTMLDivElement>(null)
-
-  const handleFullScreenChange = useCallback(() => {
-    setIsFullScreen(document.fullscreenElement !== null)
-  }, [])
+export function FullscreenWrapper({ children, shortCode }: FullscreenWrapperProps) {
+  const [isFullscreen, setIsFullscreen] = useState(false)
 
   useEffect(() => {
-    document.addEventListener("fullscreenchange", handleFullScreenChange)
-    return () => {
-      document.removeEventListener("fullscreenchange", handleFullScreenChange)
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement)
     }
-  }, [handleFullScreenChange])
 
-  const toggleFullScreen = () => {
-    if (!wrapperRef.current) return
+    document.addEventListener("fullscreenchange", handleFullscreenChange)
+    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange)
+  }, [])
 
-    if (!document.fullscreenElement) {
-      wrapperRef.current.requestFullscreen().catch((err) => {
-        alert(`Error attempting to enable full-screen mode: ${err.message} (${err.name})`)
-      })
-    } else {
-      if (document.exitFullscreen) {
-        document.exitFullscreen()
+  const toggleFullscreen = async () => {
+    try {
+      if (!document.fullscreenElement) {
+        await document.documentElement.requestFullscreen()
+      } else {
+        await document.exitFullscreen()
       }
+    } catch (error) {
+      console.error("Fullscreen toggle failed:", error)
     }
   }
 
   return (
-    <div ref={wrapperRef} className="relative flex h-screen w-screen items-center justify-center bg-black">
-      {children}
-      {sessionCode && (
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50">
-          <div className="bg-black/60 text-white/90 backdrop-blur-md rounded-lg px-6 py-3 text-center">
-            <p className="text-sm text-white/70 mb-1">Visit streamsketch.tech and enter</p>
-            <p className="font-mono text-2xl font-bold tracking-wider text-green-400">
-              {"★ "}
-              {sessionCode}
-              {" ★"}
-            </p>
-          </div>
-        </div>
-      )}
-      <div className="absolute right-4 bottom-4 z-20">
-        <Button
-          onClick={toggleFullScreen}
-          variant="outline"
-          size="icon"
-          className="h-12 w-12 rounded-full bg-black/50 text-white backdrop-blur-sm hover:bg-white/20"
-        >
-          {isFullScreen ? <Minimize className="h-6 w-6" /> : <Maximize className="h-6 w-6" />}
-          <span className="sr-only">{isFullScreen ? "Exit Fullscreen" : "Enter Fullscreen"}</span>
-        </Button>
+    <div className="relative h-full w-full">
+      {/* Instructions and Session Code - Always visible at top */}
+      <div className="absolute left-1/2 top-4 z-40 -translate-x-1/2 transform text-center">
+        <p className="text-sm text-gray-600 dark:text-gray-400">Visit streamsketch.tech and enter</p>
+        <div className="mt-1 text-2xl font-bold text-green-500">★ {shortCode} ★</div>
       </div>
+
+      {/* Fullscreen Toggle Button */}
+      <Button
+        onClick={toggleFullscreen}
+        variant="outline"
+        size="icon"
+        className="absolute right-4 top-4 z-40 bg-white/90 backdrop-blur-sm hover:bg-white dark:bg-gray-800/90 dark:hover:bg-gray-800"
+      >
+        {isFullscreen ? <Minimize className="h-4 w-4" /> : <Maximize className="h-4 w-4" />}
+      </Button>
+
+      {/* Main Content */}
+      <div className="h-full w-full pt-16">{children}</div>
     </div>
   )
 }
