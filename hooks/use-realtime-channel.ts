@@ -27,7 +27,7 @@ export function useRealtimeChannel(sessionId: string | null, options: UseRealtim
   const optionsRef = useRef(options)
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("connected")
 
-  // Prevent infinite recursion
+  // Prevent infinite recursion with proper state management
   const isReconnectingRef = useRef(false)
   const reconnectTimeoutRef = useRef<number | null>(null)
   const backoffAttemptRef = useRef(0)
