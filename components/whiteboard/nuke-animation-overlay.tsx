@@ -1,57 +1,66 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
-import type { NukeAnimation } from "@/lib/nuke-animations"
+import { useEffect, useState } from "react"
+import { NUKE_ANIMATIONS } from "@/lib/nuke-animations"
 
 interface NukeAnimationOverlayProps {
-  animation: NukeAnimation | null
-  onComplete: () => void
+  nukeEvent: {
+    username: string | null
+    animationId: string
+  } | null
 }
 
-export function NukeAnimationOverlay({ animation, onComplete }: NukeAnimationOverlayProps) {
-  const videoRef = useRef<HTMLVideoElement>(null)
+export function NukeAnimationOverlay({ nukeEvent }: NukeAnimationOverlayProps) {
   const [isVisible, setIsVisible] = useState(false)
 
+  // This effect triggers the animation's visibility when a new nuke event arrives.
   useEffect(() => {
-    if (animation && videoRef.current) {
+    if (nukeEvent) {
       setIsVisible(true)
-      const video = videoRef.current
-
-      // Reset video to start
-      video.currentTime = 0
-
-      // Play the video
-      video.play().catch(console.error)
-
-      // Handle video end
-      const handleVideoEnd = () => {
-        setTimeout(() => {
-          setIsVisible(false)
-          setTimeout(onComplete, 500) // Allow fade out animation
-        }, 500)
-      }
-
-      video.addEventListener("ended", handleVideoEnd)
-
-      return () => {
-        video.removeEventListener("ended", handleVideoEnd)
-      }
     }
-  }, [animation, onComplete])
+  }, [nukeEvent])
 
-  if (!animation || !isVisible) {
+  // This effect handles the timeout specifically for the default (non-video) animation.
+  useEffect(() => {
+    if (isVisible && nukeEvent?.animationId === "default") {
+      const timer = setTimeout(() => {
+        setIsVisible(false)
+      }, 4500) // The default flash animation is 4.5s long.
+      return () => clearTimeout(timer)
+    }
+  }, [isVisible, nukeEvent])
+
+  const handleVideoEnd = () => {
+    setIsVisible(false)
+  }
+
+  if (!isVisible || !nukeEvent) {
     return null
   }
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 animate-nuke-flash">
-      <div className="relative w-full h-full animate-nuke-shake">
-        <video ref={videoRef} className="w-full h-full object-cover" muted playsInline preload="auto">
-          <source src={animation.video} type="video/mp4" />
-        </video>
+  const animation = NUKE_ANIMATIONS[nukeEvent.animationId] || NUKE_ANIMATIONS.default
+  const displayName = nukeEvent.username || "A mysterious user"
 
-        {/* Optional overlay effects */}
-        <div className="absolute inset-0 bg-white/10 animate-pulse" />
+  return (
+    <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center overflow-hidden">
+      {animation.video && (
+        <video
+          src={animation.video}
+          autoPlay
+          muted
+          playsInline
+          onEnded={handleVideoEnd}
+          className="absolute h-full w-full object-cover"
+        />
+      )}
+
+      <div className="relative z-10 animate-nuke-shake text-center">
+        <h1 className="text-7xl font-extrabold text-white drop-shadow-[0_5px_10px_rgba(0,0,0,0.8)] md:text-9xl">
+          NUKE
+        </h1>
+        <p className="text-2xl font-bold text-white drop-shadow-[0_2px_5px_rgba(0,0,0,0.8)] md:text-4xl">
+          by {displayName}
+        </p>
       </div>
     </div>
   )
