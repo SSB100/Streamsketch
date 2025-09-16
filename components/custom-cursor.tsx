@@ -1,47 +1,41 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useState, useEffect } from "react"
+import { motion } from "framer-motion"
+import { useIsMobile } from "@/hooks/use-mobile"
 
-interface CustomCursorProps {
-  isDrawing?: boolean
-  brushSize?: number
-  color?: string
-}
-
-export function CustomCursor({ isDrawing = false, brushSize = 5, color = "#00ff00" }: CustomCursorProps) {
-  const [position, setPosition] = useState({ x: 0, y: 0 })
-  const [isVisible, setIsVisible] = useState(false)
+const CustomCursor = () => {
+  const isMobile = useIsMobile()
+  const [mousePosition, setMousePosition] = useState({ x: -100, y: -100 })
 
   useEffect(() => {
-    const updatePosition = (e: MouseEvent) => {
-      setPosition({ x: e.clientX, y: e.clientY })
-      setIsVisible(true)
+    const mouseMove = (e: MouseEvent) => {
+      setMousePosition({ x: e.clientX, y: e.clientY })
     }
 
-    const hideCursor = () => setIsVisible(false)
-
-    document.addEventListener("mousemove", updatePosition)
-    document.addEventListener("mouseleave", hideCursor)
+    window.addEventListener("mousemove", mouseMove)
 
     return () => {
-      document.removeEventListener("mousemove", updatePosition)
-      document.removeEventListener("mouseleave", hideCursor)
+      window.removeEventListener("mousemove", mouseMove)
     }
   }, [])
 
-  if (!isVisible) return null
+  if (isMobile) {
+    return null
+  }
 
   return (
-    <div
-      className="fixed pointer-events-none z-50 rounded-full border-2 border-white mix-blend-difference"
-      style={{
-        left: position.x - brushSize / 2,
-        top: position.y - brushSize / 2,
-        width: brushSize,
-        height: brushSize,
-        backgroundColor: isDrawing ? color : "transparent",
-        borderColor: color,
-        transform: "translate(-50%, -50%)",
+    <motion.div
+      className="pointer-events-none fixed left-0 top-0 z-50 h-8 w-8 rounded-full bg-neon-pink/50 blur-lg"
+      animate={{
+        x: mousePosition.x - 16,
+        y: mousePosition.y - 16,
+      }}
+      transition={{
+        type: "spring",
+        damping: 20,
+        stiffness: 200,
+        mass: 0.5,
       }}
     />
   )

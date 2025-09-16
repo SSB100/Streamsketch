@@ -1,7 +1,7 @@
 "use server"
-
+import { createSupabaseAdminClient, createSupabaseServerClient } from "@/lib/supabase/admin"
 import { revalidatePath } from "next/cache"
-import { createSupabaseAdminClient } from "@/lib/supabase/admin"
+import type { Drawing } from "@/lib/types"
 import { STREAMER_REVENUE_SHARE, APP_WALLET_ADDRESS } from "@/lib/constants"
 import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram, Transaction } from "@solana/web3.js"
 import bs58 from "bs58"
@@ -16,6 +16,7 @@ const initialState = {
   error: "",
 }
 
+// All helper functions like ensureUser, getUserData, etc. remain the same...
 async function ensureUser(walletAddress: string) {
   const admin = createSupabaseAdminClient()
   const { error: userError } = await admin.from("users").insert({ wallet_address: walletAddress }).single()
@@ -31,7 +32,6 @@ async function ensureUser(walletAddress: string) {
     throw new Error(`Failed to ensure revenue row: ${revError.message}`)
   }
 }
-
 async function getFreeCreditsTotal(
   admin: any,
   walletAddress: string,
@@ -76,7 +76,6 @@ async function getFreeCreditsTotal(
     return { totalFreeLines: 0, totalFreeNukes: 0 }
   }
 }
-
 export async function updateUserUsername(walletAddress: string, newUsername: string) {
   const admin = createSupabaseAdminClient()
   const { error } = await admin.from("users").update({ username: newUsername }).eq("wallet_address", walletAddress)
@@ -88,7 +87,6 @@ export async function updateUserUsername(walletAddress: string, newUsername: str
   revalidatePath("/dashboard")
   return { success: true }
 }
-
 export async function getUserData(walletAddress: string) {
   const admin = createSupabaseAdminClient()
   await ensureUser(walletAddress)
@@ -141,41 +139,28 @@ export async function getUserData(walletAddress: string) {
     throw new Error(`Failed to get user data: ${error?.message ?? "Unknown error"}`)
   }
 }
-
 export async function getUserSessions(walletAddress: string) {
   const admin = createSupabaseAdminClient()
   const { data, error } = await admin
     .from("sessions")
-    .select("id, short_code, is_active, is_free, created_at")
+    .select("id, short_code, is_active, created_at")
     .eq("owner_wallet_address", walletAddress)
     .order("created_at", { ascending: false })
   if (error) throw new Error(error.message)
-  return data || []
+  return data
 }
-
 export async function getTransactionHistory(walletAddress: string) {
   const admin = createSupabaseAdminClient()
-  try {
-    const { data, error } = await admin
-      .from("transactions")
-      .select("id, transaction_type, sol_amount, credit_amount, notes, created_at, signature")
-      .eq("user_wallet_address", walletAddress)
-      .order("created_at", { ascending: false })
-      .limit(50)
-
-    if (error) {
-      console.error("Get transaction history error:", error)
-      return { success: false, error: error.message, transactions: [] }
-    }
-
-    return { success: true, transactions: data || [] }
-  } catch (error: any) {
-    console.error("Get transaction history action error:", error)
-    return { success: false, error: "Failed to get transaction history", transactions: [] }
-  }
+  const { data, error } = await admin
+    .from("transactions")
+    .select("id, transaction_type, sol_amount, credit_amount, notes, created_at, signature")
+    .eq("user_wallet_address", walletAddress)
+    .order("created_at", { ascending: false })
+    .limit(50)
+  if (error) throw new Error(error.message)
+  return data
 }
-
-export async function createSession(walletAddress: string, sessionName: string, isFree = false) {
+export async function createSession(walletAddress: string, sessionName: string) {
   const admin = createSupabaseAdminClient()
   await ensureUser(walletAddress)
   const upperCaseName = sessionName.toUpperCase()
@@ -207,11 +192,7 @@ export async function createSession(walletAddress: string, sessionName: string, 
   }
   const { data: newSession, error } = await admin
     .from("sessions")
-    .insert({
-      owner_wallet_address: walletAddress,
-      short_code: finalCode,
-      is_free: isFree,
-    })
+    .insert({ owner_wallet_address: walletAddress, short_code: finalCode })
     .select()
     .single()
   if (error) return { success: false, error: error.message }
@@ -299,6 +280,26 @@ export async function processCreditPurchase(
 
   revalidatePath("/dashboard")
   return { success: true, message: `${creditPackage.lines} line credits added successfully!` }
+}
+
+// Add the missing purchaseCredits export (alias for processCreditPurchase)
+export const purchaseCredits = processCreditPurchase
+
+export async function getSessionData(shortCode: string) {
+  const supabase = createSupabaseAdminClient()
+  const { data: session, error: sessionError } = await supabase
+    .from("sessions")
+    .select("id, owner_wallet_address")
+    .eq("short_code", shortCode)
+    .single()
+  if (sessionError || !session) return { session: null, drawings: [] }
+  const { data: drawings, error: drawingsError } = await supabase
+    .from("drawings")
+    .select("id, drawing_data, drawer_wallet_address, created_at") // Ensure created_at is selected
+    .eq("session_id", session.id)
+    .order("id", { ascending: true })
+  if (drawingsError) throw new Error(drawingsError.message)
+  return { session, drawings: drawings as Drawing[] }
 }
 
 export async function claimRevenueAction(prevState: any, formData: FormData) {
@@ -469,6 +470,37 @@ export async function getUserFreeCreditSessions(userWallet: string) {
   }
 }
 
+export async function recordDrawingAction(
+  drawerWalletAddress: string,
+  sessionId: string,
+  drawingData: { points: any[]; color: string; lineWidth: number },
+) {
+  const supabase = createSupabaseAdminClient()
+  await ensureUser(drawerWalletAddress)
+  const { data: newDrawings, error } = await supabase.rpc("record_drawing", {
+    p_drawer_wallet_address: drawerWalletAddress,
+    p_session_id: sessionId,
+    p_drawing_data: drawingData,
+  })
+  if (error) {
+    console.error("Failed to record drawing:", error)
+    return { success: false, error: error.message }
+  }
+  const newDrawing = newDrawings && newDrawings.length > 0 ? newDrawings[0] : null
+  if (newDrawing) {
+    supabase
+      .channel(`session-${sessionId}`)
+      .send({
+        type: "broadcast",
+        event: "draw",
+        payload: { drawing: newDrawing },
+      })
+      .catch((err) => console.error(`[Realtime Broadcast Failed] Event: draw, Session: ${sessionId}`, err))
+  }
+  revalidatePath("/dashboard")
+  return { success: true }
+}
+
 export async function initiateNukeAction(
   nukerWalletAddress: string,
   sessionId: string,
@@ -541,6 +573,7 @@ export async function initiateNukeAction(
   return { success: true }
 }
 
+// New leaderboard functions
 export async function getLeaderboard() {
   const admin = createSupabaseAdminClient()
   try {
@@ -577,6 +610,21 @@ export async function getUserRank(walletAddress: string) {
   }
 }
 
-// Export aliases for compatibility
-export const purchaseCredits = processCreditPurchase
-export const purchaseNukeAlias = initiateNukeAction
+export async function getDashboardData() {
+  const supabase = await createSupabaseServerClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+
+  if (!user) {
+    return { success: false, error: "User not authenticated." }
+  }
+
+  try {
+    const { data, error } = await supabase.rpc("get_user_dashboard_data", { p_user_id: user.id }).single()
+    if (error) throw error
+    return { success: true, data }
+  } catch (error: any) {
+    return { success: false, error: `Failed to fetch data: ${error.message}` }
+  }
+}

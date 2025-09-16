@@ -1,6 +1,10 @@
+// lib/supabase/client.ts
+//
+// Browser-side helper (public anon key).
+
 "use client"
 
-import { createBrowserClient } from "@supabase/ssr"
+import { createClient } from "@supabase/supabase-js"
 import type { SupabaseClient } from "@supabase/supabase-js"
 
 // --- singleton ---
@@ -22,14 +26,13 @@ export function getSupabaseBrowserClient(): SupabaseClient {
     throw new Error("Supabase client environment variables are missing.")
   }
 
-  browserClient = createBrowserClient(supabaseUrl, supabaseAnonKey)
+  browserClient = createClient(supabaseUrl, supabaseAnonKey, {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
+    },
+  })
 
   return browserClient
 }
-
-// Export as createClient for compatibility
-export const createClient = () => {
-  return createBrowserClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!)
-}
-
-export const supabase = getSupabaseBrowserClient()

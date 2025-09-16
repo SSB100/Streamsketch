@@ -1,230 +1,274 @@
 "use client"
 
+import type React from "react"
 import { useState } from "react"
+import { useWallet } from "@solana/wallet-adapter-react"
+import { toast } from "sonner"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+  DialogDescription,
+} from "@/components/ui/dialog"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Badge } from "@/components/ui/badge"
-import { Switch } from "@/components/ui/switch"
-import { Plus, Trash2, ExternalLink, Users, Loader2 } from "lucide-react"
+import { PlusCircle, Loader2, Copy, Eye, LinkIcon, Trash2 } from "lucide-react"
 import { createSession, deleteSession } from "@/app/actions"
-import { toast } from "sonner"
+import Link from "next/link"
 
-interface Session {
+type Session = {
   id: string
   short_code: string
   is_active: boolean
-  is_free?: boolean
   created_at: string
 }
 
 interface SessionManagerProps {
-  initialSessions?: Session[]
-  walletAddress: string
+  initialSessions: Session[]
   onSessionUpdate?: () => void
 }
 
-export function SessionManager({ initialSessions = [], walletAddress, onSessionUpdate }: SessionManagerProps) {
-  const [sessionName, setSessionName] = useState("")
-  const [isFree, setIsFree] = useState(false)
+export function SessionManager({ initialSessions, onSessionUpdate }: SessionManagerProps) {
+  const { publicKey } = useWallet()
+  const [sessions, setSessions] = useState(initialSessions)
   const [isCreating, setIsCreating] = useState(false)
-  const [deletingSession, setDeletingSession] = useState<string | null>(null)
+  const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null)
+  const [sessionName, setSessionName] = useState("")
+  const [isDialogOpen, setIsDialogOpen] = useState(false)
 
-  // Ensure we have a valid array and filter out any invalid entries
-  const validSessions = Array.isArray(initialSessions)
-    ? initialSessions.filter((session) => session && session.short_code)
-    : []
-
-  const handleCreateSession = async () => {
-    if (!sessionName.trim()) {
-      toast.error("Please enter a session name")
+  const handleCreateSession = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!publicKey) {
+      toast.error("Please connect your wallet first.")
       return
     }
-
-    if (!walletAddress) {
-      toast.error("Wallet not connected")
-      return
-    }
-
     setIsCreating(true)
     try {
-      const result = await createSession(walletAddress, sessionName.trim(), isFree)
-
-      if (result.success) {
-        toast.success("Session created successfully!")
+      const result = await createSession(publicKey.toBase58(), sessionName)
+      if (result.success && result.data) {
+        toast.success(`Session "${result.data.short_code}" created!`)
+        setSessions((prev) => [result.data, ...prev])
         setSessionName("")
-        setIsFree(false)
-        // Call the update callback to refresh the parent component
-        if (onSessionUpdate) {
-          onSessionUpdate()
-        }
+        setIsDialogOpen(false)
+        onSessionUpdate?.()
       } else {
-        toast.error(result.error || "Failed to create session")
+        toast.error("Failed to create session", { description: result.error })
       }
-    } catch (error) {
-      console.error("Error creating session:", error)
-      toast.error("Failed to create session")
+    } catch (error: any) {
+      toast.error("An unexpected error occurred", { description: error.message })
     } finally {
       setIsCreating(false)
     }
   }
 
   const handleDeleteSession = async (sessionId: string) => {
-    if (!walletAddress) {
-      toast.error("Wallet not connected")
+    if (!publicKey) {
+      toast.error("Wallet not connected.")
       return
     }
-
-    setDeletingSession(sessionId)
+    setDeletingSessionId(sessionId)
     try {
-      const result = await deleteSession(sessionId, walletAddress)
-
+      const result = await deleteSession(sessionId, publicKey.toBase58())
       if (result.success) {
-        toast.success("Session deleted successfully!")
-        // Call the update callback to refresh the parent component
-        if (onSessionUpdate) {
-          onSessionUpdate()
-        }
+        toast.success("Session deleted.")
+        setSessions((prev) => prev.filter((s) => s.id !== sessionId))
+        onSessionUpdate?.()
       } else {
-        toast.error(result.error || "Failed to delete session")
+        toast.error("Failed to delete session", { description: result.error })
       }
-    } catch (error) {
-      console.error("Error deleting session:", error)
-      toast.error("Failed to delete session")
+    } catch (error: any) {
+      toast.error("An unexpected error occurred", { description: error.message })
     } finally {
-      setDeletingSession(null)
+      setDeletingSessionId(null)
     }
   }
 
-  const formatDate = (dateString: string) => {
-    try {
-      return new Date(dateString).toLocaleDateString("en-US", {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-      })
-    } catch {
-      return "Invalid date"
-    }
+  const copyToClipboard = (text: string, message: string) => {
+    navigator.clipboard.writeText(text)
+    toast.success(message)
   }
 
   return (
-    <Card className="border-cyan-400/20 bg-white/5">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-cyan-400">
-          <Users className="h-5 w-5" />
-          Session Manager ({validSessions.length})
-        </CardTitle>
-        <CardDescription className="text-muted-foreground">Create and manage your drawing sessions</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {/* Create New Session */}
-        <div className="space-y-3 rounded-lg border border-cyan-400/20 p-4">
-          <h3 className="font-medium text-white">Create New Session</h3>
-          <div>
-            <Label htmlFor="session-name" className="text-white">
-              Session Name
-            </Label>
-            <Input
-              id="session-name"
-              type="text"
-              placeholder="Enter session name (3-20 characters)"
-              value={sessionName}
-              onChange={(e) => setSessionName(e.target.value)}
-              maxLength={20}
-              className="bg-white/10 border-white/20 text-white placeholder:text-white/50"
-            />
-          </div>
-
-          <div className="flex items-center space-x-2">
-            <Switch id="is-free" checked={isFree} onCheckedChange={setIsFree} />
-            <Label htmlFor="is-free" className="text-white">
-              Free Session (no credits required)
-            </Label>
-          </div>
-
-          <Button
-            onClick={handleCreateSession}
-            disabled={isCreating || !sessionName.trim() || !walletAddress}
-            className="w-full bg-cyan-400 text-black hover:bg-cyan-400/90"
-          >
-            {isCreating ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Creating...
-              </>
-            ) : (
-              <>
-                <Plus className="mr-2 h-4 w-4" />
-                Create Session
-              </>
-            )}
-          </Button>
-
-          {!walletAddress && <p className="text-sm text-red-400">Please connect your wallet to create sessions</p>}
+    <Card className="border-border/20 bg-white/5">
+      <CardHeader className="flex flex-row items-center justify-between">
+        <div>
+          <CardTitle className="text-white">Your Sessions</CardTitle>
+          <CardDescription>Manage your whiteboards and share them with your audience.</CardDescription>
         </div>
-
-        {/* Existing Sessions */}
-        <div className="space-y-3">
-          <h3 className="font-medium text-white">Your Sessions</h3>
-          {validSessions.length === 0 ? (
-            <div className="text-center text-muted-foreground py-8">
-              <Users className="h-8 w-8 mx-auto mb-2 opacity-50" />
-              <p className="text-sm">No sessions created yet</p>
-              <p className="text-xs">Create your first session to get started</p>
-            </div>
-          ) : (
-            validSessions.map((session) => (
-              <div key={session.id} className="flex items-center justify-between rounded-lg border border-white/10 p-3">
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium text-white font-mono">{session.short_code}</span>
-                    <div className="flex gap-1">
-                      {session.is_active && (
-                        <Badge variant="default" className="text-xs bg-green-500/20 text-green-400 border-green-500/30">
-                          Active
-                        </Badge>
-                      )}
-                      {session.is_free && (
-                        <Badge variant="outline" className="text-xs border-blue-400 text-blue-400">
-                          Free
-                        </Badge>
-                      )}
-                    </div>
-                  </div>
-                  <p className="text-xs text-muted-foreground">Created {formatDate(session.created_at)}</p>
-                </div>
-                <div className="flex gap-2">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      const url = `/session/draw/${session.short_code}`
-                      window.open(url, "_blank")
-                    }}
-                    className="text-white hover:bg-white/10"
-                  >
-                    <ExternalLink className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => handleDeleteSession(session.id)}
-                    disabled={deletingSession === session.id}
-                    className="text-white hover:bg-white/10"
-                  >
-                    {deletingSession === session.id ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Trash2 className="h-4 w-4" />
-                    )}
-                  </Button>
+        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+          <DialogTrigger asChild>
+            <Button disabled={!publicKey}>
+              <PlusCircle className="mr-2 h-4 w-4" />
+              New Session
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="sm:max-w-[425px]">
+            <DialogHeader>
+              <DialogTitle>Create a new session</DialogTitle>
+              <DialogDescription>
+                Give your session a unique name. A random code will be appended to it.
+              </DialogDescription>
+            </DialogHeader>
+            <form onSubmit={handleCreateSession}>
+              <div className="grid gap-4 py-4">
+                <div className="grid grid-cols-4 items-center gap-4">
+                  <Label htmlFor="name" className="text-right">
+                    Name
+                  </Label>
+                  <Input
+                    id="name"
+                    value={sessionName}
+                    onChange={(e) => setSessionName(e.target.value)}
+                    className="col-span-3"
+                    placeholder="e.g., Monday-Stream"
+                    required
+                  />
                 </div>
               </div>
-            ))
-          )}
-        </div>
+              <div className="flex justify-end">
+                <Button type="submit" disabled={isCreating}>
+                  {isCreating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Create Session
+                </Button>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog>
+      </CardHeader>
+      <CardContent>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="text-white">Session Code</TableHead>
+              <TableHead className="text-white">Status</TableHead>
+              <TableHead className="text-white">Created</TableHead>
+              <TableHead className="text-right text-white">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {sessions.length > 0 ? (
+              sessions.map((session) => (
+                <TableRow key={session.id}>
+                  <TableCell>
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono font-bold text-primary">{session.short_code}</span>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6"
+                        onClick={() => copyToClipboard(session.short_code, "Session code copied!")}
+                      >
+                        <Copy className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <span
+                      className={`rounded-full px-2 py-1 text-xs ${
+                        session.is_active ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"
+                      }`}
+                    >
+                      {session.is_active ? "Active" : "Inactive"}
+                    </span>
+                  </TableCell>
+                  <TableCell>{new Date(session.created_at).toLocaleDateString()}</TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex items-center justify-end gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="border-secondary text-secondary hover:bg-secondary/10 hover:text-secondary bg-transparent"
+                        onClick={() =>
+                          copyToClipboard(
+                            `${window.location.origin}/session/view/${session.short_code}`,
+                            "OBS view link copied!",
+                          )
+                        }
+                      >
+                        <Copy className="mr-1 h-3 w-3" /> Copy View Link
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="border-primary text-primary hover:bg-primary/10 hover:text-primary bg-transparent"
+                        onClick={() =>
+                          copyToClipboard(
+                            `${window.location.origin}/session/draw/${session.short_code}`,
+                            "Viewer draw link copied!",
+                          )
+                        }
+                      >
+                        <LinkIcon className="mr-1 h-3 w-3" /> Copy Draw Link
+                      </Button>
+                      <Link href={`/session/view/${session.short_code}`} target="_blank" rel="noopener noreferrer">
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          className="border-secondary text-secondary hover:bg-secondary/10 hover:text-secondary bg-transparent h-9 w-9"
+                        >
+                          <Eye className="h-4 w-4" />
+                          <span className="sr-only">View Session in new tab</span>
+                        </Button>
+                      </Link>
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button variant="destructive" size="sm" disabled={deletingSessionId === session.id}>
+                            {deletingSessionId === session.id ? (
+                              <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                            ) : (
+                              <Trash2 className="mr-1 h-3 w-3" />
+                            )}
+                            Delete
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              This will permanently delete the session "{session.short_code}" and all its drawings. This
+                              action cannot be undone.
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>Cancel</AlertDialogCancel>
+                            <AlertDialogAction
+                              onClick={() => handleDeleteSession(session.id)}
+                              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                            >
+                              Yes, delete session
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))
+            ) : (
+              <TableRow>
+                <TableCell colSpan={4} className="text-center text-muted-foreground">
+                  You haven't created any sessions yet.
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
       </CardContent>
     </Card>
   )

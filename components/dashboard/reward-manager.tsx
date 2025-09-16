@@ -1,180 +1,190 @@
 "use client"
 
+import type React from "react"
+
 import { useState } from "react"
+import { useWallet } from "@solana/wallet-adapter-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Gift, Users, Zap } from "lucide-react"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Gift, Loader2, Paintbrush, Bomb } from "lucide-react"
 import { giftCreditsToSessionAction } from "@/app/actions"
 import { toast } from "sonner"
 
-interface RewardManagerProps {
-  userSessions?: Array<{
-    id: string
-    short_code: string
-    is_active: boolean
-    is_free: boolean
-  }>
-  linesGifted?: number
-  nukesGifted?: number
-  walletAddress?: string
+type Session = {
+  id: string
+  short_code: string
+  is_active: boolean
+  created_at: string
 }
 
-export function RewardManager({
-  userSessions = [],
-  linesGifted = 0,
-  nukesGifted = 0,
-  walletAddress = "",
-}: RewardManagerProps) {
-  const [selectedSession, setSelectedSession] = useState("")
+interface RewardManagerProps {
+  linesGifted: number
+  nukesGifted: number
+  userSessions: Session[]
+  onGiftSuccess?: () => void
+}
+
+export function RewardManager({ linesGifted, nukesGifted, userSessions, onGiftSuccess }: RewardManagerProps) {
+  const { publicKey } = useWallet()
+  const [selectedSessionId, setSelectedSessionId] = useState("")
   const [viewerWallet, setViewerWallet] = useState("")
-  const [linesToGift, setLinesToGift] = useState(1)
+  const [linesToGift, setLinesToGift] = useState(0)
   const [nukesToGift, setNukesToGift] = useState(0)
   const [isGifting, setIsGifting] = useState(false)
 
-  // Ensure we have a valid array and filter out any invalid entries
-  const validSessions = Array.isArray(userSessions)
-    ? userSessions.filter((session) => session && session.short_code && session.is_active)
-    : []
+  const activeSessions = userSessions.filter((session) => session.is_active)
 
-  const handleGiftCredits = async () => {
-    if (!selectedSession || !viewerWallet || (!linesToGift && !nukesToGift)) {
-      toast.error("Please fill in all required fields")
+  const handleGiftCredits = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!publicKey) {
+      toast.error("Please connect your wallet first.")
       return
     }
 
-    if (!walletAddress) {
-      toast.error("Wallet not connected")
+    if (!selectedSessionId) {
+      toast.error("Please select a session.")
+      return
+    }
+
+    if (!viewerWallet.trim()) {
+      toast.error("Please enter a viewer wallet address.")
+      return
+    }
+
+    if (linesToGift <= 0 && nukesToGift <= 0) {
+      toast.error("Please specify at least one credit to gift.")
       return
     }
 
     setIsGifting(true)
     try {
       const result = await giftCreditsToSessionAction(
-        walletAddress,
-        selectedSession,
-        viewerWallet,
+        publicKey.toBase58(),
+        selectedSessionId,
+        viewerWallet.trim(),
         linesToGift,
         nukesToGift,
       )
 
       if (result.success) {
-        toast.success("Credits gifted successfully!")
+        toast.success("Credits gifted successfully!", { description: result.message })
         setViewerWallet("")
-        setLinesToGift(1)
+        setLinesToGift(0)
         setNukesToGift(0)
+        setSelectedSessionId("")
+        onGiftSuccess?.()
       } else {
-        toast.error(result.error || "Failed to gift credits")
+        toast.error("Failed to gift credits", { description: result.error })
       }
-    } catch (error) {
-      console.error("Error gifting credits:", error)
-      toast.error("Failed to gift credits")
+    } catch (error: any) {
+      toast.error("An unexpected error occurred", { description: error.message })
     } finally {
       setIsGifting(false)
     }
   }
 
   return (
-    <Card>
+    <Card className="border-border/20 bg-white/5">
       <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Gift className="h-5 w-5" />
-          Reward Viewers
-        </CardTitle>
-        <CardDescription>Gift credits to viewers in your active sessions</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="grid grid-cols-2 gap-4">
-          <div className="text-center">
-            <div className="text-2xl font-bold text-blue-400">{linesGifted || 0}</div>
-            <div className="text-sm text-muted-foreground">Lines Gifted Today</div>
-          </div>
-          <div className="text-center">
-            <div className="text-2xl font-bold text-purple-400">{nukesGifted || 0}</div>
-            <div className="text-sm text-muted-foreground">Nukes Gifted Today</div>
-          </div>
+        <div className="flex items-center gap-2">
+          <Gift className="h-5 w-5 text-primary" />
+          <CardTitle className="text-white">Reward Viewers</CardTitle>
         </div>
-
-        {validSessions.length > 0 ? (
-          <div className="space-y-4">
-            <div>
-              <Label htmlFor="session-select">Select Session</Label>
-              <select
-                id="session-select"
-                value={selectedSession}
-                onChange={(e) => setSelectedSession(e.target.value)}
-                className="w-full mt-1 p-2 border rounded-md bg-background"
-              >
-                <option value="">Choose a session...</option>
-                {validSessions.map((session) => (
-                  <option key={session.id} value={session.id}>
-                    {session.short_code} {session.is_free && "(Free)"}
-                  </option>
-                ))}
-              </select>
+        <CardDescription>
+          Gift free credits to your viewers. You've gifted {linesGifted} lines and {nukesGifted} nukes today.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {activeSessions.length === 0 ? (
+          <p className="text-center text-muted-foreground">
+            You need at least one active session to gift credits to viewers.
+          </p>
+        ) : (
+          <form onSubmit={handleGiftCredits} className="space-y-4">
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="session" className="text-white">
+                  Select Session
+                </Label>
+                <Select value={selectedSessionId} onValueChange={setSelectedSessionId}>
+                  <SelectTrigger className="bg-background/50">
+                    <SelectValue placeholder="Choose a session" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {activeSessions.map((session) => (
+                      <SelectItem key={session.id} value={session.id}>
+                        {session.short_code}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="viewer-wallet" className="text-white">
+                  Viewer Wallet Address
+                </Label>
+                <Input
+                  id="viewer-wallet"
+                  value={viewerWallet}
+                  onChange={(e) => setViewerWallet(e.target.value)}
+                  placeholder="Enter viewer's wallet address"
+                  disabled={isGifting}
+                  className="bg-background/50"
+                />
+              </div>
             </div>
-
-            <div>
-              <Label htmlFor="viewer-wallet">Viewer Wallet Address</Label>
-              <Input
-                id="viewer-wallet"
-                type="text"
-                placeholder="Enter viewer's wallet address"
-                value={viewerWallet}
-                onChange={(e) => setViewerWallet(e.target.value)}
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label htmlFor="lines-to-gift">Lines to Gift</Label>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="lines-to-gift" className="text-white flex items-center gap-2">
+                  <Paintbrush className="h-4 w-4" />
+                  Lines to Gift
+                </Label>
                 <Input
                   id="lines-to-gift"
                   type="number"
                   min="0"
-                  max="100"
+                  max="10"
                   value={linesToGift}
-                  onChange={(e) => setLinesToGift(Number(e.target.value))}
+                  onChange={(e) => setLinesToGift(Number.parseInt(e.target.value) || 0)}
+                  disabled={isGifting}
+                  className="bg-background/50"
                 />
               </div>
-              <div>
-                <Label htmlFor="nukes-to-gift">Nukes to Gift</Label>
+              <div className="space-y-2">
+                <Label htmlFor="nukes-to-gift" className="text-white flex items-center gap-2">
+                  <Bomb className="h-4 w-4" />
+                  Nukes to Gift
+                </Label>
                 <Input
                   id="nukes-to-gift"
                   type="number"
                   min="0"
-                  max="10"
+                  max="5"
                   value={nukesToGift}
-                  onChange={(e) => setNukesToGift(Number(e.target.value))}
+                  onChange={(e) => setNukesToGift(Number.parseInt(e.target.value) || 0)}
+                  disabled={isGifting}
+                  className="bg-background/50"
                 />
               </div>
             </div>
-
             <Button
-              onClick={handleGiftCredits}
-              disabled={isGifting || !selectedSession || !viewerWallet}
+              type="submit"
+              disabled={
+                !publicKey ||
+                isGifting ||
+                !selectedSessionId ||
+                !viewerWallet.trim() ||
+                (linesToGift <= 0 && nukesToGift <= 0)
+              }
               className="w-full"
             >
-              {isGifting ? (
-                <>
-                  <Zap className="mr-2 h-4 w-4 animate-spin" />
-                  Gifting...
-                </>
-              ) : (
-                <>
-                  <Gift className="mr-2 h-4 w-4" />
-                  Gift Credits
-                </>
-              )}
+              {isGifting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Gift Credits
             </Button>
-          </div>
-        ) : (
-          <div className="text-center text-muted-foreground py-4">
-            <Users className="h-8 w-8 mx-auto mb-2 opacity-50" />
-            <p className="text-sm">No active sessions</p>
-            <p className="text-xs">Create an active session to gift credits to viewers</p>
-          </div>
+          </form>
         )}
       </CardContent>
     </Card>
