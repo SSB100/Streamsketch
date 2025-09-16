@@ -1,110 +1,157 @@
 "use client"
 
 import { useState } from "react"
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
-import { Bomb, Zap, Heart } from "lucide-react"
+import { Card, CardContent } from "@/components/ui/card"
 import { NUKE_ANIMATIONS, type NukeAnimation } from "@/lib/nuke-animations"
+import { Loader2 } from "lucide-react"
 import Image from "next/image"
+import { useWallet } from "@solana/wallet-adapter-react"
 
 interface NukeSelectionDialogProps {
   isOpen: boolean
-  onOpenChange: (open: boolean) => void
-  onNuke: (animation: NukeAnimation) => void
+  onOpenChange: (isOpen: boolean) => void
+  onNuke: (animation: NukeAnimation) => Promise<void>
   freeNukeCount: number
-  isSessionFree?: boolean
 }
 
-export function NukeSelectionDialog({
-  isOpen,
-  onOpenChange,
-  onNuke,
-  freeNukeCount,
-  isSessionFree = false,
-}: NukeSelectionDialogProps) {
-  const [selectedNuke, setSelectedNuke] = useState<NukeAnimation | null>(null)
+// Reusable Nuke Card Component
+const NukeCard = ({
+  animation,
+  isNuking,
+  onSelect,
+  isFree = false,
+  freeNukeCount = 0,
+  isDisabled,
+}: {
+  animation: NukeAnimation
+  isNuking: boolean
+  onSelect: (animation: NukeAnimation) => void
+  isFree?: boolean
+  freeNukeCount?: number
+  isDisabled: boolean
+}) => {
+  const cardClass = isFree ? "border-2 border-dashed border-green-400 bg-white/5" : "border-border/20 bg-white/5"
+  const buttonClass = isFree ? "bg-green-500 text-white hover:bg-green-500/90" : ""
 
-  const handleNuke = () => {
-    if (selectedNuke) {
-      onNuke(selectedNuke)
-      setSelectedNuke(null)
+  return (
+    <Card key={animation.id} className={`overflow-hidden ${cardClass}`}>
+      <CardContent className="flex h-full flex-col p-4">
+        <div className="relative mb-4 h-40 w-full overflow-hidden rounded-md bg-black">
+          <Image
+            src={animation.preview || "/placeholder.svg"}
+            alt={`${animation.name} Preview`}
+            layout="fill"
+            objectFit="cover"
+            className={isFree ? "opacity-40" : ""}
+          />
+          {isFree && (
+            <div className="absolute inset-0 flex items-center justify-center p-2">
+              <p className="text-center text-lg font-bold text-white drop-shadow-lg">Free Use Tokens Only</p>
+            </div>
+          )}
+        </div>
+        <div className="flex-grow">
+          <h3 className={`text-lg font-bold ${isFree ? "text-green-400" : "text-white"}`}>{animation.name}</h3>
+          <p className="text-sm text-muted-foreground">
+            {isFree ? (
+              <>
+                You have: <span className="font-bold text-white">{freeNukeCount}</span>
+              </>
+            ) : (
+              <>
+                Price: <span className="font-bold text-white">{animation.price} SOL</span>
+              </>
+            )}
+          </p>
+        </div>
+        <Button onClick={() => onSelect(animation)} disabled={isDisabled} className={`mt-4 w-full ${buttonClass}`}>
+          {isNuking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+          {isFree ? "Use Free Nuke" : "Purchase & Nuke"}
+        </Button>
+      </CardContent>
+    </Card>
+  )
+}
+
+export function NukeSelectionDialog({ isOpen, onOpenChange, onNuke, freeNukeCount }: NukeSelectionDialogProps) {
+  const { publicKey } = useWallet()
+  const [isNuking, setIsNuking] = useState<string | null>(null)
+
+  const allNukes = Object.values(NUKE_ANIMATIONS)
+  const freeNukeAnim = allNukes.find((nuke) => nuke.id === "free_nuke")
+  const defaultNukeAnim = allNukes.find((nuke) => nuke.id === "default")
+  const premiumNukes = allNukes.filter((nuke) => nuke.id !== "free_nuke" && nuke.id !== "default")
+
+  const handleSelect = async (animation: NukeAnimation) => {
+    setIsNuking(animation.id)
+    try {
+      await onNuke(animation)
+    } finally {
+      setIsNuking(null)
     }
-  }
-
-  const canUseNuke = (nuke: NukeAnimation) => {
-    if (isSessionFree) return true
-    if (nuke.id === "free_nuke") return freeNukeCount > 0
-    return true // Paid nukes are always available if user has SOL
-  }
-
-  const getNukeButtonText = (nuke: NukeAnimation) => {
-    if (isSessionFree) return "Use Nuke (Free)"
-    if (nuke.id === "free_nuke") return `Use Free Nuke (${freeNukeCount} left)`
-    return `Use Nuke (${nuke.price} SOL)`
   }
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-4xl border-border/40 bg-deep-space">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-white">
-            <Bomb className="h-5 w-5 text-neon-cyan" />
-            {isSessionFree ? "Clear the Board" : "Choose Your Nuke"}
-          </DialogTitle>
+          <DialogTitle className="text-white">Choose Your Nuke</DialogTitle>
+          <DialogDescription>
+            Select a nuke to clear the board. The list is scrollable if there are many options.
+          </DialogDescription>
         </DialogHeader>
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {NUKE_ANIMATIONS.map((nuke) => (
-            <div
-              key={nuke.id}
-              className={`cursor-pointer rounded-lg border-2 p-4 transition-all ${
-                selectedNuke?.id === nuke.id
-                  ? "border-neon-cyan bg-neon-cyan/10"
-                  : "border-border/40 bg-white/5 hover:border-border/60"
-              }`}
-              onClick={() => setSelectedNuke(nuke)}
-            >
-              <div className="mb-3 flex items-center justify-between">
-                <h3 className="font-bold text-white">{nuke.name}</h3>
-                {isSessionFree ? (
-                  <Badge className="bg-green-500/20 text-green-400">
-                    <Heart className="mr-1 h-3 w-3" />
-                    Free
-                  </Badge>
-                ) : nuke.id === "free_nuke" ? (
-                  <Badge className="bg-green-500/20 text-green-400">
-                    <Zap className="mr-1 h-3 w-3" />
-                    Free
-                  </Badge>
-                ) : (
-                  <Badge className="bg-neon-pink/20 text-neon-pink">{nuke.price} SOL</Badge>
-                )}
-              </div>
-              <div className="mb-3 aspect-video overflow-hidden rounded-lg bg-black/50">
-                <Image
-                  src={nuke.previewImage || "/placeholder.svg"}
-                  alt={nuke.name}
-                  width={300}
-                  height={169}
-                  className="h-full w-full object-cover"
+        <div className="max-h-[70vh] space-y-6 overflow-y-auto p-1 pr-4">
+          {/* Free Nuke Section */}
+          {freeNukeCount > 0 && freeNukeAnim && (
+            <section>
+              <h3 className="mb-4 border-b border-border/20 pb-2 text-xl font-bold text-white">Free Nuke</h3>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                <NukeCard
+                  animation={freeNukeAnim}
+                  isNuking={isNuking === freeNukeAnim.id}
+                  onSelect={handleSelect}
+                  isFree={true}
+                  freeNukeCount={freeNukeCount}
+                  isDisabled={!!isNuking || !publicKey}
                 />
               </div>
-              <p className="text-sm text-gray-300">{nuke.description}</p>
-            </div>
-          ))}
-        </div>
-        <div className="flex justify-end gap-2 pt-4">
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button
-            onClick={handleNuke}
-            disabled={!selectedNuke || !canUseNuke(selectedNuke)}
-            className="bg-neon-cyan text-white hover:bg-neon-cyan/90"
-          >
-            <Bomb className="mr-2 h-4 w-4" />
-            {selectedNuke ? getNukeButtonText(selectedNuke) : "Select a Nuke"}
-          </Button>
+            </section>
+          )}
+
+          {/* Default Nuke Section */}
+          {defaultNukeAnim && (
+            <section>
+              <h3 className="mb-4 border-b border-border/20 pb-2 text-xl font-bold text-white">Default Nuke</h3>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                <NukeCard
+                  animation={defaultNukeAnim}
+                  isNuking={isNuking === defaultNukeAnim.id}
+                  onSelect={handleSelect}
+                  isDisabled={!!isNuking || !publicKey}
+                />
+              </div>
+            </section>
+          )}
+
+          {/* Premium Nukes Section */}
+          {premiumNukes.length > 0 && (
+            <section>
+              <h3 className="mb-4 border-b border-border/20 pb-2 text-xl font-bold text-white">Premium Nukes</h3>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+                {premiumNukes.map((anim) => (
+                  <NukeCard
+                    key={anim.id}
+                    animation={anim}
+                    isNuking={isNuking === anim.id}
+                    onSelect={handleSelect}
+                    isDisabled={!!isNuking || !publicKey}
+                  />
+                ))}
+              </div>
+            </section>
+          )}
         </div>
       </DialogContent>
     </Dialog>

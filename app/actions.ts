@@ -143,7 +143,7 @@ export async function getUserSessions(walletAddress: string) {
   const admin = createSupabaseAdminClient()
   const { data, error } = await admin
     .from("sessions")
-    .select("id, short_code, is_active, is_free, created_at")
+    .select("id, short_code, is_active, created_at")
     .eq("owner_wallet_address", walletAddress)
     .order("created_at", { ascending: false })
   if (error) throw new Error(error.message)
@@ -160,7 +160,7 @@ export async function getTransactionHistory(walletAddress: string) {
   if (error) throw new Error(error.message)
   return data
 }
-export async function createSession(walletAddress: string, sessionName: string, isFree = false) {
+export async function createSession(walletAddress: string, sessionName: string) {
   const admin = createSupabaseAdminClient()
   await ensureUser(walletAddress)
   const upperCaseName = sessionName.toUpperCase()
@@ -192,34 +192,12 @@ export async function createSession(walletAddress: string, sessionName: string, 
   }
   const { data: newSession, error } = await admin
     .from("sessions")
-    .insert({
-      owner_wallet_address: walletAddress,
-      short_code: finalCode,
-      is_free: isFree,
-    })
+    .insert({ owner_wallet_address: walletAddress, short_code: finalCode })
     .select()
     .single()
   if (error) return { success: false, error: error.message }
   revalidatePath("/dashboard")
   return { success: true, data: newSession }
-}
-
-export async function toggleSessionFreeStatus(sessionId: string, walletAddress: string, isFree: boolean) {
-  const admin = createSupabaseAdminClient()
-  try {
-    const { data, error } = await admin.rpc("toggle_session_free_status", {
-      p_session_id: sessionId,
-      p_owner_wallet_address: walletAddress,
-      p_is_free: isFree,
-    })
-    if (error) {
-      return { success: false, error: error.message }
-    }
-    revalidatePath("/dashboard")
-    return { success: true }
-  } catch (error: any) {
-    return { success: false, error: error.message }
-  }
 }
 
 export async function processCreditPurchase(
@@ -308,7 +286,7 @@ export async function getSessionData(shortCode: string) {
   const supabase = createSupabaseAdminClient()
   const { data: session, error: sessionError } = await supabase
     .from("sessions")
-    .select("id, owner_wallet_address, is_free")
+    .select("id, owner_wallet_address")
     .eq("short_code", shortCode)
     .single()
   if (sessionError || !session) return { session: null, drawings: [] }
@@ -521,12 +499,6 @@ export async function initiateNukeAction(
   txSignature?: string,
 ) {
   const supabase = createSupabaseAdminClient()
-
-  // Get session info to check if it's free
-  const { data: sessionData } = await supabase.from("sessions").select("is_free").eq("id", sessionId).single()
-
-  const isSessionFree = sessionData?.is_free || false
-
   const { data: nukerData } = await supabase
     .from("users")
     .select("username")
@@ -534,25 +506,22 @@ export async function initiateNukeAction(
     .single()
   const nukerUsername = nukerData?.username || "A mysterious user"
 
-  if (nukeAnimation.id === "free_nuke" || isSessionFree) {
-    // For free sessions, allow any nuke without payment or credit deduction
-    if (!isSessionFree) {
-      const { error: decrementError } = await supabase.rpc("decrement_session_free_nuke_credit", {
+  if (nukeAnimation.id === "free_nuke") {
+    const { error: decrementError } = await supabase.rpc("decrement_session_free_nuke_credit", {
+      p_nuker_wallet_address: nukerWalletAddress,
+      p_session_id: sessionId,
+    })
+    if (decrementError) {
+      return { success: false, error: `Failed to use free nuke: ${decrementError.message}` }
+    }
+    supabase
+      .rpc("perform_free_nuke_cleanup", {
         p_nuker_wallet_address: nukerWalletAddress,
         p_session_id: sessionId,
       })
-      if (decrementError) {
-        return { success: false, error: `Failed to use free nuke: ${decrementError.message}` }
-      }
-      supabase
-        .rpc("perform_free_nuke_cleanup", {
-          p_nuker_wallet_address: nukerWalletAddress,
-          p_session_id: sessionId,
-        })
-        .then(({ error }) => {
-          if (error) console.error(`[Background Free Nuke Cleanup Failed] Session: ${sessionId}`, error)
-        })
-    }
+      .then(({ error }) => {
+        if (error) console.error(`[Background Free Nuke Cleanup Failed] Session: ${sessionId}`, error)
+      })
   } else {
     if (!txSignature) {
       return { success: false, error: "Transaction signature is required for paid nukes." }
