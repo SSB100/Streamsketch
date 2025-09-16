@@ -1,15 +1,13 @@
 "use server"
-import { createSupabaseAdminClient } from "@/lib/supabase/admin"
-import { createSupabaseServerClient } from "@/lib/supabase/server"
+import { createSupabaseAdminClient, createSupabaseServerClient } from "@/lib/supabase/admin"
 import { revalidatePath } from "next/cache"
-import type { Drawing, Advertisement } from "@/lib/types"
+import type { Drawing } from "@/lib/types"
 import { STREAMER_REVENUE_SHARE, APP_WALLET_ADDRESS } from "@/lib/constants"
 import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram, Transaction } from "@solana/web3.js"
 import bs58 from "bs58"
 import type { NukeAnimation } from "@/lib/nuke-animations"
 import { PURCHASE_PACKAGES } from "@/lib/packages"
 import { getErrorMessage } from "@/lib/utils"
-import { put, del } from "@vercel/blob"
 
 const initialState = {
   success: false,
@@ -111,8 +109,20 @@ export async function getUserData(walletAddress: string) {
       console.error("[StreamSketch] Error getting revenue data:", revenueError.message)
       throw revenueError
     }
-    // Unlimited free gifting: keep return shape but no longer fetch or track weekly totals
-    const giftingData = { lines_gifted: 0, nukes_gifted: 0 }
+    let giftingData = { lines_gifted: 0, nukes_gifted: 0 }
+    try {
+      const { data: giftingResult, error: giftingError } = await admin
+        .rpc("get_gifting_limits", { p_streamer_wallet_address: walletAddress })
+        .single()
+      if (!giftingError && giftingResult) {
+        giftingData = {
+          lines_gifted: giftingResult.lines_gifted ?? 0,
+          nukes_gifted: giftingResult.nukes_gifted ?? 0,
+        }
+      }
+    } catch (err: any) {
+      console.warn("[StreamSketch] Error fetching gifting limits, using defaults:", err?.message ?? err)
+    }
     const { totalFreeLines, totalFreeNukes } = await getFreeCreditsTotal(admin, walletAddress)
     return {
       lineCredits: (userData.line_credits_standard || 0) + (userData.line_credits_discounted || 0),
@@ -608,159 +618,4 @@ export async function getDashboardData() {
   } catch (error: any) {
     return { success: false, error: `Failed to fetch data: ${error.message}` }
   }
-}
-
-// --- Advertisement Actions ---
-
-export async function getStreamerAd(streamerWalletAddress: string): Promise<Advertisement | null> {
-  const admin = createSupabaseAdminClient()
-
-  try {
-    const { data, error } = await admin
-      .from("advertisements")
-      .select("file_path, file_type, file_name")
-      .eq("streamer_wallet_address", streamerWalletAddress)
-      .eq("is_active", true)
-      .single()
-
-    if (error && error.code !== "PGRST116") {
-      console.error("Error fetching streamer ad:", error)
-      return null
-    }
-
-    if (!data) return null
-
-    return {
-      filePath: data.file_path,
-      fileType: data.file_type as Advertisement["fileType"],
-      fileName: data.file_name,
-    }
-  } catch (error) {
-    console.error("Error in getStreamerAd:", error)
-    return null
-  }
-}
-
-export async function uploadCustomAd(
-  prevState: any,
-  formData: FormData,
-): Promise<{ success: boolean; error?: string; message?: string }> {
-  const admin = createSupabaseAdminClient()
-  const streamerWallet = formData.get("streamerWallet") as string
-  const adFile = formData.get("adFile") as File
-
-  if (!streamerWallet || !adFile) {
-    return { success: false, error: "Missing wallet address or file." }
-  }
-
-  if (adFile.size > 50 * 1024 * 1024) {
-    return { success: false, error: "File size cannot exceed 50MB." }
-  }
-
-  // Map file types to database enum values
-  let fileType: Advertisement["fileType"]
-  if (adFile.type.startsWith("video/")) {
-    fileType = "video"
-  } else if (adFile.type === "image/gif") {
-    fileType = "gif"
-  } else if (adFile.type.startsWith("image/")) {
-    fileType = "image"
-  } else {
-    return { success: false, error: "Invalid file type. Please upload an MP4, GIF, PNG, or JPG." }
-  }
-
-  try {
-    // Delete existing ad if it exists
-    const { data: existingAd } = await admin
-      .from("advertisements")
-      .select("file_path")
-      .eq("streamer_wallet_address", streamerWallet)
-      .single()
-
-    if (existingAd?.file_path) {
-      try {
-        await del(existingAd.file_path)
-      } catch (deleteError) {
-        console.warn("Failed to delete existing ad file:", deleteError)
-      }
-    }
-
-    // Upload new file
-    const blob = await put(`ads/${streamerWallet}/${adFile.name}`, adFile, {
-      access: "public",
-      contentType: adFile.type,
-      allowOverwrite: true,
-    })
-
-    // Save to database
-    const { error: dbError } = await admin.from("advertisements").upsert(
-      {
-        streamer_wallet_address: streamerWallet,
-        file_path: blob.url,
-        file_type: fileType,
-        file_name: adFile.name,
-        is_active: true,
-      },
-      { onConflict: "streamer_wallet_address" },
-    )
-
-    if (dbError) {
-      console.error("Database error:", dbError)
-      throw dbError
-    }
-
-    revalidatePath("/dashboard")
-    return { success: true, message: "Custom advertisement uploaded successfully!" }
-  } catch (error: any) {
-    console.error("Failed to upload custom ad:", error)
-    return { success: false, error: getErrorMessage(error) }
-  }
-}
-
-export async function deleteCustomAd(
-  streamerWalletAddress: string,
-): Promise<{ success: boolean; error?: string; message?: string }> {
-  const admin = createSupabaseAdminClient()
-
-  try {
-    const { data: ad, error: fetchError } = await admin
-      .from("advertisements")
-      .select("file_path")
-      .eq("streamer_wallet_address", streamerWalletAddress)
-      .single()
-
-    if (fetchError && fetchError.code !== "PGRST116") throw fetchError
-
-    if (ad?.file_path) {
-      try {
-        await del(ad.file_path)
-      } catch (deleteError) {
-        console.warn("Failed to delete ad file from blob storage:", deleteError)
-      }
-    }
-
-    const { error: deleteError } = await admin
-      .from("advertisements")
-      .delete()
-      .eq("streamer_wallet_address", streamerWalletAddress)
-
-    if (deleteError) throw deleteError
-
-    revalidatePath("/dashboard")
-    return { success: true, message: "Custom advertisement removed." }
-  } catch (error: any) {
-    console.error("Failed to delete custom ad:", error)
-    return { success: false, error: getErrorMessage(error) }
-  }
-}
-
-export async function getSessionRevenueLedger(sessionId: string) {
-  const admin = createSupabaseAdminClient()
-  const { data, error } = await admin
-    .from("session_revenue_ledger")
-    .select("id, session_id, streamer_wallet_address, user_wallet_address, revenue_type, source, gross_sol, streamer_share_sol, transaction_id, drawing_id, created_at")
-    .eq("session_id", sessionId)
-    .order("created_at", { ascending: true })
-  if (error) throw new Error(error.message)
-  return data || []
 }

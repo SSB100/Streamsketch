@@ -1,82 +1,72 @@
--- This script corrects and replaces the leaderboard functions to fix schema mismatches.
+-- This script creates functions to support the leaderboard system
 
--- Forcefully drop the old functions and any dependent objects to ensure a clean update.
--- This is necessary to resolve issues where the function signature might have changed.
-DROP FUNCTION IF EXISTS get_leaderboard(integer);
-DROP FUNCTION IF EXISTS get_user_rank(text);
-
--- Recreate the function to get the top N streamers for the leaderboard.
--- This version uses the correct 'total_claimed_sol' column name.
-CREATE OR REPLACE FUNCTION get_leaderboard(p_limit integer DEFAULT 10)
+-- Function to get the top 10 users by total earnings (claimed + unclaimed)
+CREATE OR REPLACE FUNCTION get_leaderboard(p_limit INT DEFAULT 10)
 RETURNS TABLE(
-    rank bigint,
-    wallet_address text,
-    username text,
-    total_earnings numeric,
-    unclaimed_sol numeric,
-    total_claimed_sol numeric
-)
-LANGUAGE plpgsql
-AS $$
+    rank BIGINT,
+    wallet_address TEXT,
+    username TEXT,
+    total_earnings NUMERIC(20, 9),
+    unclaimed_sol NUMERIC(20, 9),
+    total_claimed_sol NUMERIC(20, 9)
+) AS $$
 BEGIN
     RETURN QUERY
-    SELECT
-        ROW_NUMBER() OVER (ORDER BY (COALESCE(r.unclaimed_sol, 0) + COALESCE(r.total_claimed_sol, 0)) DESC) as rank,
+    SELECT 
+        ROW_NUMBER() OVER (ORDER BY (r.unclaimed_sol + r.total_claimed_sol) DESC) as rank,
         u.wallet_address,
         u.username,
-        (COALESCE(r.unclaimed_sol, 0) + COALESCE(r.total_claimed_sol, 0)) as total_earnings,
+        (r.unclaimed_sol + r.total_claimed_sol) as total_earnings,
         r.unclaimed_sol,
         r.total_claimed_sol
-    FROM
-        users u
-    JOIN
-        revenue r ON u.wallet_address = r.streamer_wallet_address
-    WHERE
-        (COALESCE(r.unclaimed_sol, 0) + COALESCE(r.total_claimed_sol, 0)) > 0
-    ORDER BY
-        total_earnings DESC
+    FROM users u
+    INNER JOIN revenue r ON u.wallet_address = r.streamer_wallet_address
+    WHERE (r.unclaimed_sol + r.total_claimed_sol) > 0
+    ORDER BY total_earnings DESC
     LIMIT p_limit;
 END;
-$$;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- Recreate the function to get a specific user's rank and earnings.
--- This version also uses the correct 'total_claimed_sol' column name.
-CREATE OR REPLACE FUNCTION get_user_rank(p_wallet_address text)
+-- Function to get a specific user's rank and earnings
+CREATE OR REPLACE FUNCTION get_user_rank(p_wallet_address TEXT)
 RETURNS TABLE(
-    user_rank bigint,
-    total_earnings numeric,
-    total_users_with_earnings bigint
-)
-LANGUAGE plpgsql
-AS $$
+    user_rank BIGINT,
+    total_earnings NUMERIC(20, 9),
+    total_users_with_earnings BIGINT
+) AS $$
 BEGIN
     RETURN QUERY
     WITH ranked_users AS (
-        SELECT
+        SELECT 
             u.wallet_address,
-            (COALESCE(r.unclaimed_sol, 0) + COALESCE(r.total_claimed_sol, 0)) as earnings,
-            ROW_NUMBER() OVER (ORDER BY (COALESCE(r.unclaimed_sol, 0) + COALESCE(r.total_claimed_sol, 0)) DESC) as rank
-        FROM
-            users u
-        JOIN
-            revenue r ON u.wallet_address = r.streamer_wallet_address
-        WHERE
-            (COALESCE(r.unclaimed_sol, 0) + COALESCE(r.total_claimed_sol, 0)) > 0
+            (r.unclaimed_sol + r.total_claimed_sol) as earnings,
+            ROW_NUMBER() OVER (ORDER BY (r.unclaimed_sol + r.total_claimed_sol) DESC) as rank
+        FROM users u
+        INNER JOIN revenue r ON u.wallet_address = r.streamer_wallet_address
+        WHERE (r.unclaimed_sol + r.total_claimed_sol) > 0
     ),
-    total_count AS (
-        SELECT count(*) as total FROM ranked_users
+    user_stats AS (
+        SELECT 
+            COALESCE(ru.rank, 0) as user_rank,
+            COALESCE(ru.earnings, 0) as total_earnings,
+            (SELECT COUNT(*) FROM ranked_users) as total_users_with_earnings
+        FROM ranked_users ru
+        WHERE ru.wallet_address = p_wallet_address
+        UNION ALL
+        SELECT 0, 0, (SELECT COUNT(*) FROM ranked_users)
+        WHERE NOT EXISTS (SELECT 1 FROM ranked_users WHERE wallet_address = p_wallet_address)
+        LIMIT 1
     )
-    SELECT
-        COALESCE(ru.rank, 0)::bigint,
-        COALESCE(ru.earnings, 0)::numeric,
-        tc.total::bigint
-    FROM
-        total_count tc
-    LEFT JOIN
-        ranked_users ru ON ru.wallet_address = p_wallet_address;
+    SELECT 
+        us.user_rank,
+        us.total_earnings,
+        us.total_users_with_earnings
+    FROM user_stats us;
 END;
-$$;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- Grant execute permissions for the new functions
-GRANT EXECUTE ON FUNCTION get_leaderboard(integer) TO anon, authenticated;
-GRANT EXECUTE ON FUNCTION get_user_rank(text) TO anon, authenticated;
+-- Grant execute permissions
+GRANT EXECUTE ON FUNCTION get_leaderboard(INT) TO anon;
+GRANT EXECUTE ON FUNCTION get_leaderboard(INT) TO authenticated;
+GRANT EXECUTE ON FUNCTION get_user_rank(TEXT) TO anon;
+GRANT EXECUTE ON FUNCTION get_user_rank(TEXT) TO authenticated;

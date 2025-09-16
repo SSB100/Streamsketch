@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { toast } from "sonner"
 import { giftCreditsToSessionAction } from "@/app/actions"
-import { Loader2, Gift } from 'lucide-react'
+import { Loader2, Gift } from "lucide-react"
 
 interface RewardManagerProps {
   linesGifted: number
@@ -68,13 +68,23 @@ export function RewardManager({ linesGifted, nukesGifted, userSessions, onGiftSu
   return (
     <Card className="border-border/20 bg-white/5">
       <CardHeader>
-        <div className="flex flex-col gap-2">
-          <CardTitle className="text-white">Reward Viewers</CardTitle>
-          <CardDescription>
-            Gift free lines and nukes to your community for specific sessions. Credits are tied to the session and
-            will be deleted if the session is removed.
-          </CardDescription>
-          <p className="text-xs text-muted-foreground">Free gifting is unlimited. No weekly caps.</p>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <CardTitle className="text-white">Reward Viewers</CardTitle>
+            <CardDescription>
+              Gift free lines and nukes to your community for specific sessions. Credits are tied to the session and
+              will be deleted if the session is removed.
+            </CardDescription>
+          </div>
+          <div className="flex-shrink-0 text-right text-sm">
+            <p className="text-muted-foreground">Weekly Gifts Sent</p>
+            <p className="font-mono text-white">
+              {linesGifted} / 100 <span className="text-muted-foreground">Lines</span>
+            </p>
+            <p className="font-mono text-white">
+              {nukesGifted} / 10 <span className="text-muted-foreground">Nukes</span>
+            </p>
+          </div>
         </div>
       </CardHeader>
       <CardContent>
@@ -123,6 +133,7 @@ export function RewardManager({ linesGifted, nukesGifted, userSessions, onGiftSu
                 value={lines || ""}
                 onChange={(e) => setLines(Number.parseInt(e.target.value, 10) || 0)}
                 min="0"
+                max="100"
               />
             </div>
             <div className="grid w-full items-center gap-1.5">
@@ -136,6 +147,7 @@ export function RewardManager({ linesGifted, nukesGifted, userSessions, onGiftSu
                 value={nukes || ""}
                 onChange={(e) => setNukes(Number.parseInt(e.target.value, 10) || 0)}
                 min="0"
+                max="10"
               />
             </div>
             <div className="flex items-end">

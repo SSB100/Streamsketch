@@ -4,7 +4,7 @@ import { useEffect, useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
-import { Trophy, Medal, Award, Crown } from 'lucide-react'
+import { Trophy, Medal, Award, Crown } from "lucide-react"
 import { formatSol } from "@/lib/utils"
 import { getLeaderboard } from "@/app/actions"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -34,17 +34,19 @@ const getRankIcon = (rank: number) => {
 const getRankBadgeVariant = (rank: number) => {
   switch (rank) {
     case 1:
-      return "default"
+      return "default" // Gold
     case 2:
-      return "secondary"
+      return "secondary" // Silver
     case 3:
-      return "outline"
+      return "outline" // Bronze
     default:
       return "outline"
   }
 }
 
-const formatWalletAddress = (address: string) => `${address.slice(0, 4)}...${address.slice(-4)}`
+const formatWalletAddress = (address: string) => {
+  return `${address.slice(0, 4)}...${address.slice(-4)}`
+}
 
 export function Leaderboard() {
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([])
@@ -65,6 +67,7 @@ export function Leaderboard() {
         setIsLoading(false)
       }
     }
+
     fetchLeaderboard()
   }, [])
 

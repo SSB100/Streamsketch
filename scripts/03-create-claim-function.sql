@@ -1,8 +1,3 @@
--- Drop the function if it exists, along with any dependent objects.
--- This is crucial because later migrations change the return type, and dropping
--- with CASCADE handles potential dependencies.
-DROP FUNCTION IF EXISTS claim_all_revenue(TEXT) CASCADE;
-
 CREATE OR REPLACE FUNCTION claim_all_revenue(
     p_streamer_wallet_address TEXT
 )

@@ -1,20 +1,43 @@
+// lib/supabase/admin.ts
+//
+// Server-side helpers (service-role key). DO NOT import from the browser.
+
 import { createClient } from "@supabase/supabase-js"
+import type { SupabaseClient } from "@supabase/supabase-js"
 
-// Admin client for server-side operations with service_role permissions.
-// IMPORTANT: This should only be used in server-side code (Server Actions, Route Handlers).
-// Do not expose the service_role key to the browser.
-export function createSupabaseAdminClient() {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const supabaseServiceKey = process.env.SUPABASE_SUPABASE_SERVICE_ROLE_KEY
+// --- singleton ---
+let adminClient: SupabaseClient | undefined
 
-  if (!supabaseUrl || !supabaseServiceKey) {
-    throw new Error("Supabase admin client environment variables are missing.")
+function initAdminClient() {
+  const supabaseUrl = process.env.SUPABASE_SUPABASE_URL
+  const serviceRoleKey = process.env.SUPABASE_SUPABASE_SERVICE_ROLE_KEY
+
+  if (!supabaseUrl || !serviceRoleKey) {
+    throw new Error("Supabase server environment variables are missing.")
   }
 
-  return createClient(supabaseUrl, supabaseServiceKey, {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-    },
+  return createClient(supabaseUrl, serviceRoleKey, {
+    auth: { persistSession: false }, // Never persist sessions on the server
   })
 }
+
+/**
+ * Returns a singleton Supabase client for server environments.
+ * Call this from Route Handlers, Server Actions, etc.
+ */
+export function getSupabaseServerClient(): SupabaseClient {
+  if (!adminClient) {
+    adminClient = initAdminClient()
+  }
+  return adminClient
+}
+
+/**
+ * Legacy alias to satisfy older imports.
+ */
+export const createSupabaseAdminClient = getSupabaseServerClient
+
+/**
+ * Additional legacy alias.
+ */
+export const createSupabaseServerClient = getSupabaseServerClient

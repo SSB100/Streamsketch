@@ -1,8 +1,3 @@
--- Drop the function if it exists, along with any dependent objects.
--- This is necessary to ensure a clean state when running migrations from the beginning,
--- especially if the database schema is from a more recent version.
-DROP FUNCTION IF EXISTS spend_credit_and_draw(TEXT, UUID, JSONB) CASCADE;
-
 -- This function ensures all drawing-related operations happen atomically.
 CREATE OR REPLACE FUNCTION spend_credit_and_draw(
     p_drawer_wallet_address TEXT,

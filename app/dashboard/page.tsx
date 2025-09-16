@@ -9,15 +9,13 @@ import { PurchaseCredits } from "@/components/dashboard/purchase-credits"
 import { SessionManager } from "@/components/dashboard/session-manager"
 import { TransactionHistory } from "@/components/dashboard/transaction-history"
 import { ProfileManager } from "@/components/dashboard/profile-manager"
-import { getUserData, getUserSessions, getUserFreeCreditSessions, getStreamerAd } from "@/app/actions"
+import { getUserData, getUserSessions, getUserFreeCreditSessions } from "@/app/actions"
 import { Skeleton } from "@/components/ui/skeleton"
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui"
 import { toast } from "sonner"
 import { RewardManager } from "@/components/dashboard/reward-manager"
 import { ErrorBoundary } from "@/components/error-boundary"
 import { FreeCreditsDisplay } from "@/components/dashboard/free-credits-display"
-import { AdManager } from "@/components/dashboard/ad-manager"
-import type { Advertisement } from "@/lib/types"
 
 // Define the types for our state
 type UserData = {
@@ -62,7 +60,6 @@ function DashboardSkeleton() {
       <Skeleton className="h-[280px] w-full" /> {/* Reward Manager */}
       <Skeleton className="h-[300px] w-full" /> {/* Purchase Credits */}
       <Skeleton className="h-[400px] w-full" /> {/* Session Manager */}
-      <Skeleton className="h-[400px] w-full" /> {/* Ad Manager */}
       <Skeleton className="h-[400px] w-full" /> {/* Transaction History */}
     </div>
   )
@@ -74,7 +71,6 @@ function DashboardContent() {
   const [userData, setUserData] = useState<UserData | null>(null)
   const [sessions, setSessions] = useState<Session[]>([])
   const [freeCreditSessions, setFreeCreditSessions] = useState<FreeCreditSession[]>([])
-  const [customAd, setCustomAd] = useState<Advertisement | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [hasError, setHasError] = useState(false)
 
@@ -84,11 +80,10 @@ function DashboardContent() {
     setHasError(false)
     try {
       // Fetch all data in parallel for a faster load
-      const [dataResult, sessionsResult, freeCreditsResult, adResult] = await Promise.allSettled([
+      const [dataResult, sessionsResult, freeCreditsResult] = await Promise.allSettled([
         getUserData(publicKey.toBase58()),
         getUserSessions(publicKey.toBase58()),
         getUserFreeCreditSessions(publicKey.toBase58()),
-        getStreamerAd(publicKey.toBase58()),
       ])
 
       // Process user data
@@ -116,14 +111,6 @@ function DashboardContent() {
         console.error("Failed to load free credits:", freeCreditsResult.reason)
         setFreeCreditSessions([])
       }
-
-      // Process ad data
-      if (adResult.status === "fulfilled") {
-        setCustomAd(adResult.value)
-      } else {
-        console.error("Failed to load ad data:", adResult.reason)
-        setCustomAd(null)
-      }
     } catch (error) {
       console.error("Failed to load dashboard data:", error)
       setHasError(true)
@@ -142,7 +129,6 @@ function DashboardContent() {
       setUserData(null)
       setSessions([])
       setFreeCreditSessions([])
-      setCustomAd(null)
       setHasError(false)
       return
     }
@@ -219,7 +205,6 @@ function DashboardContent() {
       />
       <PurchaseCredits onPurchaseSuccess={refreshAllData} />
       <SessionManager initialSessions={sessions} onSessionUpdate={refreshAllData} />
-      <AdManager initialAd={customAd} />
       <TransactionHistory />
     </div>
   )

@@ -129,18 +129,6 @@ export default function ViewPage({ params }: { params: { code: string } }) {
       className="relative flex h-screen w-full flex-col items-center justify-center bg-deep-space p-4"
     >
       <NukeAnimationOverlay nukeEvent={nukeEvent} />
-
-      {/* Session Information at the top */}
-      <div className="absolute left-4 top-4 z-50 rounded-lg bg-black/70 px-4 py-2 text-white backdrop-blur-sm">
-        <div className="text-sm font-medium">
-          Session ID: <span className="font-mono text-green-400">{session.id}</span>
-        </div>
-        <div className="text-sm font-medium">
-          Visit <span className="text-green-400">streamsketch.tech</span> and enter
-        </div>
-        <div className="text-lg font-bold text-green-400">★ {params.code} ★</div>
-      </div>
-
       <div className="relative w-full max-w-full h-full max-h-full aspect-[16/9]">
         <Canvas
           ref={canvasRef}
@@ -154,7 +142,7 @@ export default function ViewPage({ params }: { params: { code: string } }) {
           className="h-full w-full border-white/20"
         />
       </div>
-      <div className="absolute left-4 bottom-4 flex items-center gap-2 rounded-full bg-black/50 px-4 py-2 text-white backdrop-blur-sm">
+      <div className="absolute left-4 top-4 flex items-center gap-2 rounded-full bg-black/50 px-4 py-2 text-white backdrop-blur-sm">
         <Eye className="h-5 w-5 text-green-400" />
         <span className="font-bold">STREAMER VIEW (READ-ONLY)</span>
       </div>

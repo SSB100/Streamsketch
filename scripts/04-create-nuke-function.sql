@@ -1,6 +1,3 @@
--- Drop the function if it exists to allow for re-creation with a different signature.
-DROP FUNCTION IF EXISTS nuke_board(TEXT, UUID);
-
 CREATE OR REPLACE FUNCTION nuke_board(
     p_nuker_wallet_address TEXT,
     p_session_id UUID

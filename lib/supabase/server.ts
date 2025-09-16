@@ -5,8 +5,11 @@ export function createSupabaseServerClient() {
   const cookieStore = cookies()
 
   return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    // This reads the server-side URL, which is correct.
+    process.env.SUPABASE_SUPABASE_URL!,
+    // CORRECTED: This was pointing to a non-existent variable. It now correctly
+    // points to your public anon key, which is what the server client needs.
+    process.env.SUPABASE_SUPABASE_NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
         get(name: string) {
