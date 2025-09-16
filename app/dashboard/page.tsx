@@ -48,19 +48,19 @@ type FreeCreditSession = {
 function DashboardSkeleton() {
   return (
     <div className="flex flex-col gap-8">
-      <Skeleton className="h-[125px] w-full" /> {/* Rank Display */}
+      <Skeleton className="h-[125px] w-full" />
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <Skeleton className="h-[125px] w-full" />
         <Skeleton className="h-[125px] w-full" />
         <Skeleton className="h-[125px] w-full" />
         <Skeleton className="h-[125px] w-full" />
       </div>
-      <Skeleton className="h-[160px] w-full" /> {/* Placeholder for Free Credits Display */}
-      <Skeleton className="h-[120px] w-full" /> {/* Profile Manager */}
-      <Skeleton className="h-[280px] w-full" /> {/* Reward Manager */}
-      <Skeleton className="h-[300px] w-full" /> {/* Purchase Credits */}
-      <Skeleton className="h-[400px] w-full" /> {/* Session Manager */}
-      <Skeleton className="h-[400px] w-full" /> {/* Transaction History */}
+      <Skeleton className="h-[160px] w-full" />
+      <Skeleton className="h-[120px] w-full" />
+      <Skeleton className="h-[280px] w-full" />
+      <Skeleton className="h-[300px] w-full" />
+      <Skeleton className="h-[400px] w-full" />
+      <Skeleton className="h-[400px] w-full" />
     </div>
   )
 }
@@ -92,7 +92,7 @@ function DashboardContent() {
       } else {
         console.error("Failed to load user data:", dataResult.reason)
         toast.error("Could not load your account data.")
-        setUserData(null) // Clear stale data on error
+        setUserData(null)
         throw new Error("Failed to load user data")
       }
 
@@ -102,7 +102,6 @@ function DashboardContent() {
       } else {
         console.error("Failed to load sessions:", sessionsResult.reason)
         setSessions([])
-        // Don't throw error for sessions, just log it
       }
 
       // Process free credit sessions - don't fail the whole dashboard if this fails
@@ -111,7 +110,6 @@ function DashboardContent() {
       } else {
         console.error("Failed to load free credits:", freeCreditsResult.reason)
         setFreeCreditSessions([])
-        // Don't throw error for free credits, just log it
       }
     } catch (error) {
       console.error("Failed to load dashboard data:", error)
@@ -185,52 +183,29 @@ function DashboardContent() {
     )
   }
 
-  // Render the full dashboard with error boundaries around each section
+  // Render the full dashboard
   return (
     <div className="flex flex-col gap-8">
-      <ErrorBoundary fallback={<div className="text-red-500">Error loading rank display</div>}>
-        <RankDisplay totalEarnings={userData.unclaimedSol + userData.totalClaimedSol} />
-      </ErrorBoundary>
-
-      <ErrorBoundary fallback={<div className="text-red-500">Error loading stats cards</div>}>
-        <StatsCards
-          lineCredits={userData.lineCredits}
-          unclaimedSol={userData.unclaimedSol}
-          totalClaimedSol={userData.totalClaimedSol}
-          totalFreeLines={userData.totalFreeLines}
-          totalFreeNukes={userData.totalFreeNukes}
-          onClaimSuccess={refreshAllData}
-        />
-      </ErrorBoundary>
-
-      <ErrorBoundary fallback={<div className="text-red-500">Error loading free credits</div>}>
-        <FreeCreditsDisplay freeCreditSessions={freeCreditSessions} />
-      </ErrorBoundary>
-
-      <ErrorBoundary fallback={<div className="text-red-500">Error loading profile manager</div>}>
-        <ProfileManager initialUsername={userData.username} />
-      </ErrorBoundary>
-
-      <ErrorBoundary fallback={<div className="text-red-500">Error loading reward manager</div>}>
-        <RewardManager
-          linesGifted={userData.linesGifted}
-          nukesGifted={userData.nukesGifted}
-          userSessions={sessions}
-          onGiftSuccess={refreshAllData}
-        />
-      </ErrorBoundary>
-
-      <ErrorBoundary fallback={<div className="text-red-500">Error loading purchase credits</div>}>
-        <PurchaseCredits onPurchaseSuccess={refreshAllData} />
-      </ErrorBoundary>
-
-      <ErrorBoundary fallback={<div className="text-red-500">Error loading session manager</div>}>
-        <SessionManager initialSessions={sessions} onSessionUpdate={refreshAllData} />
-      </ErrorBoundary>
-
-      <ErrorBoundary fallback={<div className="text-red-500">Error loading transaction history</div>}>
-        <TransactionHistory />
-      </ErrorBoundary>
+      <RankDisplay totalEarnings={userData.unclaimedSol + userData.totalClaimedSol} />
+      <StatsCards
+        lineCredits={userData.lineCredits}
+        unclaimedSol={userData.unclaimedSol}
+        totalClaimedSol={userData.totalClaimedSol}
+        totalFreeLines={userData.totalFreeLines}
+        totalFreeNukes={userData.totalFreeNukes}
+        onClaimSuccess={refreshAllData}
+      />
+      <FreeCreditsDisplay freeCreditSessions={freeCreditSessions} />
+      <ProfileManager initialUsername={userData.username} />
+      <RewardManager
+        linesGifted={userData.linesGifted}
+        nukesGifted={userData.nukesGifted}
+        userSessions={sessions}
+        onGiftSuccess={refreshAllData}
+      />
+      <PurchaseCredits onPurchaseSuccess={refreshAllData} />
+      <SessionManager initialSessions={sessions} onSessionUpdate={refreshAllData} />
+      <TransactionHistory />
     </div>
   )
 }
