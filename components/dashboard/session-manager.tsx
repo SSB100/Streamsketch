@@ -41,9 +41,10 @@ type Session = {
 
 interface SessionManagerProps {
   initialSessions: Session[]
+  onSessionUpdate?: () => void
 }
 
-export function SessionManager({ initialSessions }: SessionManagerProps) {
+export function SessionManager({ initialSessions, onSessionUpdate }: SessionManagerProps) {
   const { publicKey } = useWallet()
   const [sessions, setSessions] = useState(initialSessions)
   const [isCreating, setIsCreating] = useState(false)
@@ -65,6 +66,7 @@ export function SessionManager({ initialSessions }: SessionManagerProps) {
         setSessions((prev) => [result.data, ...prev])
         setSessionName("")
         setIsDialogOpen(false)
+        onSessionUpdate?.()
       } else {
         toast.error("Failed to create session", { description: result.error })
       }
@@ -86,6 +88,7 @@ export function SessionManager({ initialSessions }: SessionManagerProps) {
       if (result.success) {
         toast.success("Session deleted.")
         setSessions((prev) => prev.filter((s) => s.id !== sessionId))
+        onSessionUpdate?.()
       } else {
         toast.error("Failed to delete session", { description: result.error })
       }
