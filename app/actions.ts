@@ -1,7 +1,7 @@
 "use server"
 
 import { revalidatePath } from "next/cache"
-import { createSupabaseAdminClient, createSupabaseServerClient } from "@/lib/supabase/admin"
+import { createSupabaseAdminClient } from "@/lib/supabase/admin"
 import { STREAMER_REVENUE_SHARE, APP_WALLET_ADDRESS } from "@/lib/constants"
 import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram, Transaction } from "@solana/web3.js"
 import bs58 from "bs58"
@@ -16,7 +16,6 @@ const initialState = {
   error: "",
 }
 
-// All helper functions like ensureUser, getUserData, etc. remain the same...
 async function ensureUser(walletAddress: string) {
   const admin = createSupabaseAdminClient()
   const { error: userError } = await admin.from("users").insert({ wallet_address: walletAddress }).single()
@@ -151,18 +150,18 @@ export async function getUserSessions(walletAddress: string) {
     .eq("owner_wallet_address", walletAddress)
     .order("created_at", { ascending: false })
   if (error) throw new Error(error.message)
-  return data
+  return data || []
 }
 
-export async function getTransactionHistory(userId: string) {
-  const supabase = createSupabaseServerClient()
-
+export async function getTransactionHistory(walletAddress: string) {
+  const admin = createSupabaseAdminClient()
   try {
-    const { data, error } = await supabase
+    const { data, error } = await admin
       .from("transactions")
-      .select("*")
-      .eq("user_id", userId)
+      .select("id, transaction_type, sol_amount, credit_amount, notes, created_at, signature")
+      .eq("user_wallet_address", walletAddress)
       .order("created_at", { ascending: false })
+      .limit(50)
 
     if (error) {
       console.error("Get transaction history error:", error)
@@ -170,7 +169,7 @@ export async function getTransactionHistory(userId: string) {
     }
 
     return { success: true, transactions: data || [] }
-  } catch (error) {
+  } catch (error: any) {
     console.error("Get transaction history action error:", error)
     return { success: false, error: "Failed to get transaction history", transactions: [] }
   }
@@ -300,120 +299,6 @@ export async function processCreditPurchase(
 
   revalidatePath("/dashboard")
   return { success: true, message: `${creditPackage.lines} line credits added successfully!` }
-}
-
-// Add the missing purchaseCredits export (alias for processCreditPurchase)
-export const purchaseCredits = processCreditPurchase
-
-export async function getSessionData(sessionCode: string) {
-  const supabase = createSupabaseServerClient()
-
-  try {
-    // Get session details
-    const { data: session, error: sessionError } = await supabase
-      .from("sessions")
-      .select("*")
-      .eq("code", sessionCode)
-      .single()
-
-    if (sessionError || !session) {
-      return { session: null, drawings: [] }
-    }
-
-    // Get drawings for this session
-    const { data: drawings, error: drawingsError } = await supabase
-      .from("drawings")
-      .select("*")
-      .eq("session_id", session.id)
-      .order("created_at", { ascending: true })
-
-    return {
-      session,
-      drawings: drawings || [],
-    }
-  } catch (error) {
-    console.error("Error fetching session data:", error)
-    return { session: null, drawings: [] }
-  }
-}
-
-export async function recordDrawingAction(sessionCode: string, drawingData: any) {
-  const supabase = createSupabaseServerClient()
-
-  try {
-    // Get current user
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser()
-    if (authError || !user) {
-      return { success: false, error: "Authentication required" }
-    }
-
-    // Call the record drawing RPC function
-    const { data, error } = await supabase.rpc("record_drawing_with_free_session_support", {
-      p_session_code: sessionCode,
-      p_drawing_data: drawingData,
-      p_user_id: user.id,
-    })
-
-    if (error) {
-      console.error("Record drawing error:", error)
-      return { success: false, error: error.message }
-    }
-
-    if (!data.success) {
-      return { success: false, error: data.error }
-    }
-
-    revalidatePath(`/session/draw/${sessionCode}`)
-    return {
-      success: true,
-      lines_drawn: data.lines_drawn,
-      credits_remaining: data.credits_remaining,
-      is_free_session: data.is_free_session,
-    }
-  } catch (error) {
-    console.error("Record drawing action error:", error)
-    return { success: false, error: "Failed to record drawing" }
-  }
-}
-
-export async function purchaseNuke(sessionCode: string, nukeType: string) {
-  const supabase = createSupabaseServerClient()
-
-  try {
-    // Get current user
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser()
-    if (authError || !user) {
-      return { success: false, error: "Authentication required" }
-    }
-
-    // Call the purchase nuke RPC function
-    const { data, error } = await supabase.rpc("purchase_nuke", {
-      p_session_code: sessionCode,
-      p_nuke_type: nukeType,
-      p_user_id: user.id,
-    })
-
-    if (error) {
-      console.error("Purchase nuke error:", error)
-      return { success: false, error: error.message }
-    }
-
-    if (!data.success) {
-      return { success: false, error: data.error }
-    }
-
-    revalidatePath(`/session/draw/${sessionCode}`)
-    return { success: true, credits_remaining: data.credits_remaining }
-  } catch (error) {
-    console.error("Purchase nuke action error:", error)
-    return { success: false, error: "Failed to purchase nuke" }
-  }
 }
 
 export async function claimRevenueAction(prevState: any, formData: FormData) {
@@ -656,10 +541,6 @@ export async function initiateNukeAction(
   return { success: true }
 }
 
-// Add the missing purchaseNuke export (alias for initiateNukeAction)
-export const purchaseNukeAlias = initiateNukeAction
-
-// New leaderboard functions
 export async function getLeaderboard() {
   const admin = createSupabaseAdminClient()
   try {
@@ -696,24 +577,6 @@ export async function getUserRank(walletAddress: string) {
   }
 }
 
-export async function getDashboardData() {
-  const supabase = await createSupabaseServerClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-
-  if (!user) {
-    return { success: false, error: "User not authenticated." }
-  }
-
-  try {
-    const { data, error } = await supabase.rpc("get_user_dashboard_data", { p_user_id: user.id }).single()
-    if (error) throw error
-    return { success: true, data }
-  } catch (error: any) {
-    return { success: false, error: `Failed to fetch data: ${error.message}` }
-  }
-}
-
 // Export aliases for compatibility
-export const recordDrawing = recordDrawingAction
+export const purchaseCredits = processCreditPurchase
+export const purchaseNukeAlias = initiateNukeAction

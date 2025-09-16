@@ -3,50 +3,45 @@
 import { useEffect, useState } from "react"
 
 interface CustomCursorProps {
+  isDrawing?: boolean
+  brushSize?: number
   color?: string
-  size?: number
 }
 
-export function CustomCursor({ color = "#ffffff", size = 20 }: CustomCursorProps) {
-  const [position, setPosition] = useState({ x: -100, y: -100 })
+export function CustomCursor({ isDrawing = false, brushSize = 5, color = "#00ff00" }: CustomCursorProps) {
+  const [position, setPosition] = useState({ x: 0, y: 0 })
   const [isVisible, setIsVisible] = useState(false)
 
   useEffect(() => {
     const updatePosition = (e: MouseEvent) => {
-      // Ensure we have valid numbers
-      const x = typeof e.clientX === "number" && !isNaN(e.clientX) ? e.clientX : -100
-      const y = typeof e.clientY === "number" && !isNaN(e.clientY) ? e.clientY : -100
-
-      setPosition({ x, y })
+      setPosition({ x: e.clientX, y: e.clientY })
+      setIsVisible(true)
     }
 
-    const handleMouseEnter = () => setIsVisible(true)
-    const handleMouseLeave = () => setIsVisible(false)
+    const hideCursor = () => setIsVisible(false)
 
     document.addEventListener("mousemove", updatePosition)
-    document.addEventListener("mouseenter", handleMouseEnter)
-    document.addEventListener("mouseleave", handleMouseLeave)
+    document.addEventListener("mouseleave", hideCursor)
 
     return () => {
       document.removeEventListener("mousemove", updatePosition)
-      document.removeEventListener("mouseenter", handleMouseEnter)
-      document.removeEventListener("mouseleave", handleMouseLeave)
+      document.removeEventListener("mouseleave", hideCursor)
     }
   }, [])
 
-  // Don't render if position is invalid or not visible
-  if (!isVisible || isNaN(position.x) || isNaN(position.y)) return null
+  if (!isVisible) return null
 
   return (
     <div
-      className="fixed pointer-events-none z-50 rounded-full border-2 border-white shadow-lg transition-opacity duration-150"
+      className="fixed pointer-events-none z-50 rounded-full border-2 border-white mix-blend-difference"
       style={{
-        left: `${position.x - size / 2}px`,
-        top: `${position.y - size / 2}px`,
-        width: `${size}px`,
-        height: `${size}px`,
-        backgroundColor: color,
-        opacity: 0.7,
+        left: position.x - brushSize / 2,
+        top: position.y - brushSize / 2,
+        width: brushSize,
+        height: brushSize,
+        backgroundColor: isDrawing ? color : "transparent",
+        borderColor: color,
+        transform: "translate(-50%, -50%)",
       }}
     />
   )
