@@ -16,7 +16,6 @@ const initialState = {
   error: "",
 }
 
-// All helper functions like ensureUser, getUserData, etc. remain the same...
 async function ensureUser(walletAddress: string) {
   const admin = createSupabaseAdminClient()
   const { error: userError } = await admin.from("users").insert({ wallet_address: walletAddress }).single()
@@ -32,6 +31,7 @@ async function ensureUser(walletAddress: string) {
     throw new Error(`Failed to ensure revenue row: ${revError.message}`)
   }
 }
+
 async function getFreeCreditsTotal(
   admin: any,
   walletAddress: string,
@@ -76,6 +76,7 @@ async function getFreeCreditsTotal(
     return { totalFreeLines: 0, totalFreeNukes: 0 }
   }
 }
+
 export async function updateUserUsername(walletAddress: string, newUsername: string) {
   const admin = createSupabaseAdminClient()
   const { error } = await admin.from("users").update({ username: newUsername }).eq("wallet_address", walletAddress)
@@ -87,6 +88,7 @@ export async function updateUserUsername(walletAddress: string, newUsername: str
   revalidatePath("/dashboard")
   return { success: true }
 }
+
 export async function getUserData(walletAddress: string) {
   const admin = createSupabaseAdminClient()
   await ensureUser(walletAddress)
@@ -139,6 +141,7 @@ export async function getUserData(walletAddress: string) {
     throw new Error(`Failed to get user data: ${error?.message ?? "Unknown error"}`)
   }
 }
+
 export async function getUserSessions(walletAddress: string) {
   const admin = createSupabaseAdminClient()
   const { data, error } = await admin
@@ -149,6 +152,7 @@ export async function getUserSessions(walletAddress: string) {
   if (error) throw new Error(error.message)
   return data
 }
+
 export async function getTransactionHistory(walletAddress: string) {
   const admin = createSupabaseAdminClient()
   const { data, error } = await admin
@@ -160,6 +164,7 @@ export async function getTransactionHistory(walletAddress: string) {
   if (error) throw new Error(error.message)
   return data
 }
+
 export async function createSession(walletAddress: string, sessionName: string) {
   const admin = createSupabaseAdminClient()
   await ensureUser(walletAddress)
@@ -211,14 +216,12 @@ export async function processCreditPurchase(
     return { success: false, error: "Invalid package selected." }
   }
 
-  // Get RPC host from environment
   const rpcHost = process.env.SOLANA_RPC_HOST || process.env.NEXT_PUBLIC_SOLANA_RPC_HOST
   if (!rpcHost) {
     console.error("CRITICAL: SOLANA_RPC_HOST is not set.")
     return { success: false, error: "Service not configured." }
   }
 
-  // Verify transaction on blockchain
   try {
     const connection = new Connection(rpcHost, "confirmed")
     const tx = await connection.getParsedTransaction(txSignature, { maxSupportedTransactionVersion: 0 })
@@ -238,16 +241,11 @@ export async function processCreditPurchase(
     if (lamports < expectedLamports * 0.99) throw new Error("Incorrect amount transferred.")
   } catch (error: any) {
     console.error(`Transaction verification failed for ${txSignature}:`, error.message)
-
-    // IMPORTANT: If verification fails due to RPC issues but we have a signature,
-    // we should still try to award credits and log the transaction
     console.warn(`Proceeding with credit award despite verification failure for signature: ${txSignature}`)
   }
 
-  // Ensure user exists
   await ensureUser(walletAddress)
 
-  // Award credits using the updated RPC function
   try {
     const { error: creditError } = await admin.rpc("add_line_credits", {
       p_wallet_address: walletAddress,
@@ -264,7 +262,6 @@ export async function processCreditPurchase(
     return { success: false, error: "Failed to process credit purchase. Please contact support." }
   }
 
-  // Log the transaction
   const { error: logError } = await admin.from("transactions").insert({
     user_wallet_address: walletAddress,
     transaction_type: "purchase_lines",
@@ -282,7 +279,6 @@ export async function processCreditPurchase(
   return { success: true, message: `${creditPackage.lines} line credits added successfully!` }
 }
 
-// Add the missing purchaseCredits export (alias for processCreditPurchase)
 export const purchaseCredits = processCreditPurchase
 
 export async function getSessionData(shortCode: string) {
@@ -295,7 +291,7 @@ export async function getSessionData(shortCode: string) {
   if (sessionError || !session) return { session: null, drawings: [] }
   const { data: drawings, error: drawingsError } = await supabase
     .from("drawings")
-    .select("id, drawing_data, drawer_wallet_address, created_at") // Ensure created_at is selected
+    .select("id, drawing_data, drawer_wallet_address, created_at")
     .eq("session_id", session.id)
     .order("id", { ascending: true })
   if (drawingsError) throw new Error(drawingsError.message)
@@ -311,7 +307,6 @@ export async function claimRevenueAction(prevState: any, formData: FormData) {
     return { ...initialState, error: "Invalid claim amount." }
   }
 
-  // 1. Call DB function to prepare the claim and get a transaction ID
   const { data: transactionId, error: claimError } = await supabase
     .rpc("claim_all_revenue", { p_streamer_wallet_address: streamerWallet })
     .single()
@@ -321,7 +316,6 @@ export async function claimRevenueAction(prevState: any, formData: FormData) {
     return { ...initialState, error: `Database claim failed: ${claimError?.message || "No revenue to claim."}` }
   }
 
-  // 2. Perform the on-chain transaction
   const secretKeyStr = process.env.APP_WALLET_SECRET_KEY
   if (!secretKeyStr) {
     console.error("CRITICAL: APP_WALLET_SECRET_KEY is not set.")
@@ -339,7 +333,6 @@ export async function claimRevenueAction(prevState: any, formData: FormData) {
     const appKeypair = Keypair.fromSecretKey(bs58.decode(secretKeyStr))
     const streamerPublicKey = new PublicKey(streamerWallet)
 
-    // THE FIX: Get the latest blockhash before creating the transaction
     const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash()
     const transaction = new Transaction({
       feePayer: appKeypair.publicKey,
@@ -355,13 +348,12 @@ export async function claimRevenueAction(prevState: any, formData: FormData) {
     const signature = await connection.sendTransaction(transaction, [appKeypair])
     await connection.confirmTransaction({ signature, lastValidBlockHeight, blockhash })
 
-    // 3. Get the transaction fee and update the database record
     const fee = (await connection.getFeeForMessage(transaction.compileMessage(), "confirmed")).value || 0
 
     await supabase.rpc("update_transaction_details", {
       p_transaction_id: transactionId,
       p_signature: signature,
-      p_fee: fee / LAMPORTS_PER_SOL, // Convert lamports to SOL
+      p_fee: fee / LAMPORTS_PER_SOL,
     })
 
     revalidatePath("/dashboard")
@@ -373,11 +365,10 @@ export async function claimRevenueAction(prevState: any, formData: FormData) {
     }
   } catch (error: any) {
     console.error(`CRITICAL: On-chain payout failed for transaction ID ${transactionId}. Reverting DB claim.`, error)
-    // SAFETY: Revert the database transaction if the on-chain transfer fails
     await supabase.from("transactions").delete().eq("id", transactionId)
     await supabase
       .from("revenue")
-      .update({ unclaimed_sol: claimAmount, total_claimed_sol: 0 }) // This is a simplified revert, might need adjustment based on exact schema
+      .update({ unclaimed_sol: claimAmount, total_claimed_sol: 0 })
       .eq("streamer_wallet_address", streamerWallet)
 
     return {
@@ -477,15 +468,18 @@ export async function recordDrawingAction(
 ) {
   const supabase = createSupabaseAdminClient()
   await ensureUser(drawerWalletAddress)
+
   const { data: newDrawings, error } = await supabase.rpc("record_drawing", {
     p_drawer_wallet_address: drawerWalletAddress,
     p_session_id: sessionId,
     p_drawing_data: drawingData,
   })
+
   if (error) {
     console.error("Failed to record drawing:", error)
     return { success: false, error: error.message }
   }
+
   const newDrawing = newDrawings && newDrawings.length > 0 ? newDrawings[0] : null
   if (newDrawing) {
     supabase
@@ -497,6 +491,7 @@ export async function recordDrawingAction(
       })
       .catch((err) => console.error(`[Realtime Broadcast Failed] Event: draw, Session: ${sessionId}`, err))
   }
+
   revalidatePath("/dashboard")
   return { success: true }
 }
@@ -565,7 +560,7 @@ export async function initiateNukeAction(
     payload: {
       username: nukerUsername,
       animationId: nukeAnimation.id,
-      nukeTimestamp: Date.now(), // Add timestamp to broadcast
+      nukeTimestamp: Date.now(),
     },
   })
 
@@ -573,7 +568,6 @@ export async function initiateNukeAction(
   return { success: true }
 }
 
-// New leaderboard functions
 export async function getLeaderboard() {
   const admin = createSupabaseAdminClient()
   try {
@@ -597,7 +591,6 @@ export async function getUserRank(walletAddress: string) {
       console.error("Failed to fetch user rank:", error)
       throw new Error(error.message)
     }
-    // The RPC returns an array with one object, so we extract the first item
     const result = Array.isArray(data) && data.length > 0 ? data[0] : null
     return {
       user_rank: result?.user_rank ?? 0,

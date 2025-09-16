@@ -1,28 +1,20 @@
-export type CreditPackage = {
-  id: "small" | "large"
-  name: string
-  lines: number
-  price: number // Total price in SOL
-  pricePerLine: number
-  isPopular?: boolean
-}
-
-const BASE_PRICE_PER_LINE = 0.001 // Updated: 0.01 SOL for 10 lines
-
-export const PURCHASE_PACKAGES: Record<"small" | "large", CreditPackage> = {
+export const PURCHASE_PACKAGES = {
   small: {
-    id: "small",
-    name: "Starter Pack",
+    id: "small" as const,
+    name: "10 Lines",
     lines: 10,
-    price: 0.01, // Updated: 0.01 SOL for 10 lines
-    pricePerLine: BASE_PRICE_PER_LINE,
+    price: 0.01, // 0.01 SOL for 10 lines = 0.001 SOL per line
+    description: "Perfect for quick sketches",
+    popular: false,
   },
   large: {
-    id: "large",
-    name: "Creator Pack",
+    id: "large" as const,
+    name: "50 Lines",
     lines: 50,
-    price: 0.03, // Updated: 0.03 SOL for 50 lines
-    pricePerLine: 0.0006, // 0.03 / 50 = 0.0006 per line
-    isPopular: true,
+    price: 0.03, // 0.03 SOL for 50 lines = 0.0006 SOL per line (40% discount)
+    description: "Best value for artists",
+    popular: true,
   },
-}
+} as const
+
+export type PurchasePackageId = keyof typeof PURCHASE_PACKAGES
