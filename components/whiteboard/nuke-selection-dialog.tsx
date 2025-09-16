@@ -42,9 +42,14 @@ const NukeCard = ({
           <Image
             src={animation.preview || "/placeholder.svg"}
             alt={`${animation.name} Preview`}
-            layout="fill"
-            objectFit="cover"
-            className={isFree ? "opacity-40" : ""}
+            fill
+            className={`object-cover ${isFree ? "opacity-40" : ""}`}
+            unoptimized
+            onError={(e) => {
+              // Fallback to placeholder if image fails to load
+              const target = e.target as HTMLImageElement
+              target.src = "/placeholder.svg?height=160&width=280&text=Nuke+Preview"
+            }}
           />
           {isFree && (
             <div className="absolute inset-0 flex items-center justify-center p-2">

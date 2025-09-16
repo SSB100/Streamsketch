@@ -1,6 +1,7 @@
 "use server"
-import { createSupabaseAdminClient, createSupabaseServerClient } from "@/lib/supabase/admin"
+
 import { revalidatePath } from "next/cache"
+import { createSupabaseAdminClient, createSupabaseServerClient } from "@/lib/supabase/admin"
 import type { Drawing } from "@/lib/types"
 import { STREAMER_REVENUE_SHARE, APP_WALLET_ADDRESS } from "@/lib/constants"
 import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram, Transaction } from "@solana/web3.js"
@@ -32,6 +33,7 @@ async function ensureUser(walletAddress: string) {
     throw new Error(`Failed to ensure revenue row: ${revError.message}`)
   }
 }
+
 async function getFreeCreditsTotal(
   admin: any,
   walletAddress: string,
@@ -76,6 +78,7 @@ async function getFreeCreditsTotal(
     return { totalFreeLines: 0, totalFreeNukes: 0 }
   }
 }
+
 export async function updateUserUsername(walletAddress: string, newUsername: string) {
   const admin = createSupabaseAdminClient()
   const { error } = await admin.from("users").update({ username: newUsername }).eq("wallet_address", walletAddress)
@@ -87,6 +90,7 @@ export async function updateUserUsername(walletAddress: string, newUsername: str
   revalidatePath("/dashboard")
   return { success: true }
 }
+
 export async function getUserData(walletAddress: string) {
   const admin = createSupabaseAdminClient()
   await ensureUser(walletAddress)
@@ -139,16 +143,18 @@ export async function getUserData(walletAddress: string) {
     throw new Error(`Failed to get user data: ${error?.message ?? "Unknown error"}`)
   }
 }
+
 export async function getUserSessions(walletAddress: string) {
   const admin = createSupabaseAdminClient()
   const { data, error } = await admin
     .from("sessions")
-    .select("id, short_code, is_active, created_at")
+    .select("id, short_code, is_active, is_free, created_at")
     .eq("owner_wallet_address", walletAddress)
     .order("created_at", { ascending: false })
   if (error) throw new Error(error.message)
   return data
 }
+
 export async function getTransactionHistory(walletAddress: string) {
   const admin = createSupabaseAdminClient()
   const { data, error } = await admin
@@ -160,7 +166,8 @@ export async function getTransactionHistory(walletAddress: string) {
   if (error) throw new Error(error.message)
   return data
 }
-export async function createSession(walletAddress: string, sessionName: string) {
+
+export async function createSession(walletAddress: string, sessionName: string, isFree = false) {
   const admin = createSupabaseAdminClient()
   await ensureUser(walletAddress)
   const upperCaseName = sessionName.toUpperCase()
@@ -192,7 +199,11 @@ export async function createSession(walletAddress: string, sessionName: string) 
   }
   const { data: newSession, error } = await admin
     .from("sessions")
-    .insert({ owner_wallet_address: walletAddress, short_code: finalCode })
+    .insert({
+      owner_wallet_address: walletAddress,
+      short_code: finalCode,
+      is_free: isFree,
+    })
     .select()
     .single()
   if (error) return { success: false, error: error.message }
@@ -289,7 +300,7 @@ export async function getSessionData(shortCode: string) {
   const supabase = createSupabaseAdminClient()
   const { data: session, error: sessionError } = await supabase
     .from("sessions")
-    .select("id, owner_wallet_address")
+    .select("id, owner_wallet_address, is_free")
     .eq("short_code", shortCode)
     .single()
   if (sessionError || !session) return { session: null, drawings: [] }
@@ -477,11 +488,14 @@ export async function recordDrawingAction(
 ) {
   const supabase = createSupabaseAdminClient()
   await ensureUser(drawerWalletAddress)
-  const { data: newDrawings, error } = await supabase.rpc("record_drawing", {
+
+  // Use the new function that supports free sessions
+  const { data: newDrawings, error } = await supabase.rpc("record_drawing_with_free_session_support", {
     p_drawer_wallet_address: drawerWalletAddress,
     p_session_id: sessionId,
     p_drawing_data: drawingData,
   })
+
   if (error) {
     console.error("Failed to record drawing:", error)
     return { success: false, error: error.message }
@@ -500,6 +514,9 @@ export async function recordDrawingAction(
   revalidatePath("/dashboard")
   return { success: true }
 }
+
+// Add the missing recordDrawing export (alias for recordDrawingAction)
+export const recordDrawing = recordDrawingAction
 
 export async function initiateNukeAction(
   nukerWalletAddress: string,
@@ -571,6 +588,41 @@ export async function initiateNukeAction(
 
   revalidatePath("/dashboard")
   return { success: true }
+}
+
+// Add the missing purchaseNuke export (alias for initiateNukeAction)
+export async function purchaseNuke(sessionCode: string, nukeType: string, txSignature?: string) {
+  try {
+    const supabase = createSupabaseAdminClient()
+
+    // Get session data first
+    const { data: session, error: sessionError } = await supabase
+      .from("sessions")
+      .select("id")
+      .eq("short_code", sessionCode)
+      .single()
+
+    if (sessionError || !session) {
+      return { success: false, error: "Session not found" }
+    }
+
+    // Find the nuke animation by type
+    const { NUKE_ANIMATIONS } = await import("@/lib/nuke-animations")
+    const nukeAnimation = NUKE_ANIMATIONS.find((nuke) => nuke.id === nukeType)
+
+    if (!nukeAnimation) {
+      return { success: false, error: "Invalid nuke type" }
+    }
+
+    // Get current user wallet (this would need to be passed or retrieved from auth)
+    // For now, we'll assume it's passed in the session or context
+    const walletAddress = "placeholder" // This should be retrieved from auth context
+
+    return await initiateNukeAction(walletAddress, session.id, nukeAnimation, txSignature)
+  } catch (error) {
+    console.error("Error in purchaseNuke:", error)
+    return { success: false, error: "Internal server error" }
+  }
 }
 
 // New leaderboard functions

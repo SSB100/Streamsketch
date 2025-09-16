@@ -1,41 +1,47 @@
 "use client"
 
-import { useState, useEffect } from "react"
-import { motion } from "framer-motion"
-import { useIsMobile } from "@/hooks/use-mobile"
+import { useEffect, useState } from "react"
 
-const CustomCursor = () => {
-  const isMobile = useIsMobile()
-  const [mousePosition, setMousePosition] = useState({ x: -100, y: -100 })
+interface CustomCursorProps {
+  color: string
+  size: number
+}
+
+export function CustomCursor({ color, size }: CustomCursorProps) {
+  const [position, setPosition] = useState({ x: 0, y: 0 })
+  const [isVisible, setIsVisible] = useState(false)
 
   useEffect(() => {
-    const mouseMove = (e: MouseEvent) => {
-      setMousePosition({ x: e.clientX, y: e.clientY })
+    const updatePosition = (e: MouseEvent) => {
+      setPosition({ x: e.clientX, y: e.clientY })
     }
 
-    window.addEventListener("mousemove", mouseMove)
+    const handleMouseEnter = () => setIsVisible(true)
+    const handleMouseLeave = () => setIsVisible(false)
+
+    document.addEventListener("mousemove", updatePosition)
+    document.addEventListener("mouseenter", handleMouseEnter)
+    document.addEventListener("mouseleave", handleMouseLeave)
 
     return () => {
-      window.removeEventListener("mousemove", mouseMove)
+      document.removeEventListener("mousemove", updatePosition)
+      document.removeEventListener("mouseenter", handleMouseEnter)
+      document.removeEventListener("mouseleave", handleMouseLeave)
     }
   }, [])
 
-  if (isMobile) {
-    return null
-  }
+  if (!isVisible) return null
 
   return (
-    <motion.div
-      className="pointer-events-none fixed left-0 top-0 z-50 h-8 w-8 rounded-full bg-neon-pink/50 blur-lg"
-      animate={{
-        x: mousePosition.x - 16,
-        y: mousePosition.y - 16,
-      }}
-      transition={{
-        type: "spring",
-        damping: 20,
-        stiffness: 200,
-        mass: 0.5,
+    <div
+      className="fixed pointer-events-none z-50 rounded-full border-2 border-white shadow-lg"
+      style={{
+        left: position.x - size / 2,
+        top: position.y - size / 2,
+        width: size,
+        height: size,
+        backgroundColor: color,
+        transform: "translate(-50%, -50%)",
       }}
     />
   )
