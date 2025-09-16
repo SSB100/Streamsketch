@@ -9,8 +9,10 @@ import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { ArrowRight, Users, Zap, Palette, TrendingUp, Monitor, Video, Tv, Gift, Heart } from "lucide-react"
 import { useWallet } from "@solana/wallet-adapter-react"
+import { WalletMultiButton } from "@solana/wallet-adapter-react-ui"
 import Link from "next/link"
 import Image from "next/image"
+import { toast } from "sonner"
 
 export default function HomePage() {
   const router = useRouter()
@@ -20,6 +22,10 @@ export default function HomePage() {
   const handleJoinSession = (e: React.FormEvent) => {
     e.preventDefault()
     if (sessionCode.trim()) {
+      if (!connected) {
+        toast.error("Please connect your wallet first to join a session")
+        return
+      }
       router.push(`/session/draw/${sessionCode.trim().toUpperCase()}`)
     }
   }
@@ -85,25 +91,38 @@ export default function HomePage() {
                     <ArrowRight className="ml-2 h-4 w-4" />
                   </Button>
                 </Link>
-                <form onSubmit={handleJoinSession} className="flex w-full gap-2 sm:w-auto">
-                  <Input
-                    type="text"
-                    placeholder="Enter Session Code"
-                    className="w-full sm:w-48"
-                    value={sessionCode}
-                    onChange={(e) => setSessionCode(e.target.value)}
-                    maxLength={25} // Increased max length for NAME-CODE format
-                    style={{ textTransform: "uppercase" }} // Visually transform text to uppercase
-                  />
-                  <Button
-                    type="submit"
-                    variant="outline"
-                    className="border-secondary text-secondary hover:bg-secondary/10 hover:text-secondary bg-transparent"
-                  >
-                    Join
-                  </Button>
-                </form>
+
+                {/* Session Join Form */}
+                <div className="flex flex-col gap-2 w-full sm:w-auto">
+                  <form onSubmit={handleJoinSession} className="flex w-full gap-2 sm:w-auto">
+                    <Input
+                      type="text"
+                      placeholder="Enter Session Code"
+                      className="w-full sm:w-48"
+                      value={sessionCode}
+                      onChange={(e) => setSessionCode(e.target.value)}
+                      maxLength={25}
+                      style={{ textTransform: "uppercase" }}
+                    />
+                    <Button
+                      type="submit"
+                      variant="outline"
+                      className="border-secondary text-secondary hover:bg-secondary/10 hover:text-secondary bg-transparent"
+                    >
+                      Join
+                    </Button>
+                  </form>
+
+                  {/* Wallet Connection Prompt for Session Join */}
+                  {!connected && sessionCode.trim() && (
+                    <div className="flex flex-col items-center gap-2 p-3 bg-yellow-400/10 border border-yellow-400/20 rounded-lg">
+                      <p className="text-sm text-yellow-100">Connect your wallet to join the session</p>
+                      <WalletMultiButton className="!bg-yellow-400 !text-black hover:!bg-yellow-300 !text-sm !py-1 !px-3 !rounded-md" />
+                    </div>
+                  )}
+                </div>
               </div>
+
               <div className="mt-4 flex items-center justify-center gap-2 text-sm text-muted-foreground">
                 <Image src="/icons/chrome.png" alt="Chrome Logo" width={16} height={16} />
                 <span>Works best on Chrome Browser</span>
