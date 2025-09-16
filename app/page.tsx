@@ -7,7 +7,7 @@ import { Leaderboard } from "@/components/leaderboard"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { ArrowRight, Users, Zap, Palette, TrendingUp } from "lucide-react"
+import { ArrowRight, Users, Zap, Palette, TrendingUp, Monitor, Video, Tv, Gift } from "lucide-react"
 import { useWallet } from "@solana/wallet-adapter-react"
 import Link from "next/link"
 import Image from "next/image"
@@ -129,7 +129,7 @@ export default function HomePage() {
                 <CardContent>
                   <CardDescription>
                     Connect your wallet, go to your dashboard, and start a new whiteboard session. You'll get a unique
-                    code for your viewers.
+                    code for your viewers. Choose between paid or free sessions.
                   </CardDescription>
                 </CardContent>
               </Card>
@@ -142,8 +142,8 @@ export default function HomePage() {
                 </CardHeader>
                 <CardContent>
                   <CardDescription>
-                    Viewers use the code to join. They purchase drawing credits with SOL to add their masterpiece to the
-                    canvas.
+                    Viewers use the code to join. In paid sessions, they purchase drawing credits with SOL. In free
+                    sessions, they can draw without any cost.
                   </CardDescription>
                 </CardContent>
               </Card>
@@ -152,12 +152,89 @@ export default function HomePage() {
                   <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-yellow-400/10">
                     <Zap className="h-6 w-6 text-yellow-400" />
                   </div>
-                  <CardTitle className="text-white">3. Earn Instantly</CardTitle>
+                  <CardTitle className="text-white">3. Earn & Engage</CardTitle>
                 </CardHeader>
                 <CardContent>
                   <CardDescription>
-                    You earn 80% of all fees generated from drawing credits used in your session. Claim your SOL
-                    earnings anytime from your dashboard.
+                    In paid sessions, earn 80% of all fees. Gift free credits to special viewers. Use free sessions for
+                    maximum engagement without barriers.
+                  </CardDescription>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        </section>
+
+        {/* New Streaming Setup Section */}
+        <section id="streaming-setup" className="py-12 md:py-16 bg-gradient-to-b from-transparent to-white/5">
+          <div className="container">
+            <div className="mx-auto mb-12 max-w-2xl text-center">
+              <h2 className="text-3xl font-bold tracking-tighter text-white sm:text-4xl">
+                Perfect for Your Stream Setup
+              </h2>
+              <p className="mt-4 text-muted-foreground">
+                Multiple ways to integrate StreamSketch into your streaming workflow
+              </p>
+            </div>
+            <div className="grid gap-8 md:grid-cols-3">
+              <Card className="border-brand-green/20 bg-white/5">
+                <CardHeader>
+                  <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-brand-green/10">
+                    <Video className="h-6 w-6 text-brand-green" />
+                  </div>
+                  <CardTitle className="text-white">OBS Browser Source</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <CardDescription>
+                    Add the view URL as a browser source in OBS. Perfect for overlays or dedicated scenes. Viewers see
+                    drawings appear in real-time on your stream.
+                  </CardDescription>
+                </CardContent>
+              </Card>
+              <Card className="border-brand-teal/20 bg-white/5">
+                <CardHeader>
+                  <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-brand-teal/10">
+                    <Monitor className="h-6 w-6 text-brand-teal" />
+                  </div>
+                  <CardTitle className="text-white">Projector Display</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <CardDescription>
+                    Use a projector to display the whiteboard in your background. Great for IRL streams or creating an
+                    interactive backdrop for your content.
+                  </CardDescription>
+                </CardContent>
+              </Card>
+              <Card className="border-neon-pink/20 bg-white/5">
+                <CardHeader>
+                  <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-neon-pink/10">
+                    <Tv className="h-6 w-6 text-neon-pink" />
+                  </div>
+                  <CardTitle className="text-white">Secondary Monitor/TV</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <CardDescription>
+                    Open the view page on a second monitor or TV visible in your stream. Viewers can see their artwork
+                    displayed prominently in your setup.
+                  </CardDescription>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Free Credits Feature Highlight */}
+            <div className="mx-auto mt-12 max-w-4xl">
+              <Card className="border-2 border-dashed border-green-400/50 bg-gradient-to-r from-green-400/5 via-transparent to-green-400/5">
+                <CardHeader className="text-center">
+                  <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-green-400/10">
+                    <Gift className="h-8 w-8 text-green-400" />
+                  </div>
+                  <CardTitle className="text-2xl text-white">Reward Your Community</CardTitle>
+                </CardHeader>
+                <CardContent className="text-center">
+                  <CardDescription className="text-lg">
+                    <strong className="text-green-400">Gift free drawing credits and nukes</strong> to your most loyal
+                    viewers, subscribers, or donors. Perfect for rewarding engagement while still monetizing your
+                    sessions. You control who gets to draw for free!
                   </CardDescription>
                 </CardContent>
               </Card>

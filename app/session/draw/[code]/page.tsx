@@ -18,7 +18,7 @@ import {
   recordDrawingAction,
   initiateNukeAction,
 } from "@/app/actions"
-import { Rocket, Edit, Bomb, RefreshCw, Wifi, WifiOff } from "lucide-react"
+import { Rocket, Edit, Bomb, RefreshCw, Wifi, WifiOff, Heart } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import {
@@ -36,7 +36,7 @@ import { ErrorBoundary } from "@/components/error-boundary"
 function DrawPageContent({ params }: { params: { code: string } }) {
   const { publicKey, sendTransaction, wallet } = useWallet()
 
-  const [session, setSession] = useState<{ id: string; owner_wallet_address: string } | null>(null)
+  const [session, setSession] = useState<{ id: string; owner_wallet_address: string; is_free?: boolean } | null>(null)
   const [drawings, setDrawings] = useState<Drawing[]>([])
   const [credits, setCredits] = useState({
     paidLines: 0,
@@ -67,6 +67,8 @@ function DrawPageContent({ params }: { params: { code: string } }) {
     >
   >(new Map())
   const nextTempIdRef = useRef(1)
+
+  const isSessionFree = session?.is_free || false
 
   const handleIncomingDraw = useCallback(({ drawing }: { drawing: Drawing }) => {
     const tempId = Array.from(pendingDrawingsRef.current.entries()).find(
@@ -161,7 +163,7 @@ function DrawPageContent({ params }: { params: { code: string } }) {
           setIsLoading(false)
           return
         }
-        setSession(s as { id: string; owner_wallet_address: string })
+        setSession(s as { id: string; owner_wallet_address: string; is_free?: boolean })
         setDrawings(d)
       } catch (err) {
         console.error("Bootstrap failed:", err)
@@ -174,26 +176,44 @@ function DrawPageContent({ params }: { params: { code: string } }) {
   }, [params.code])
 
   useEffect(() => {
-    if (session && publicKey) {
+    if (session && publicKey && !isSessionFree) {
       refreshUserData()
     }
-  }, [session, publicKey, refreshUserData])
+  }, [session, publicKey, refreshUserData, isSessionFree])
 
   useEffect(() => {
     if (previousConnectionStatus.current !== "connected" && connectionStatus === "connected") {
       console.log("[DrawPage] Reconnected. Syncing canvas and user data...")
       toast.info("Reconnected! Syncing data...")
-      refreshUserData()
+      if (!isSessionFree) {
+        refreshUserData()
+      }
       syncCanvasState()
     }
     previousConnectionStatus.current = connectionStatus
-  }, [connectionStatus, refreshUserData, syncCanvasState])
+  }, [connectionStatus, refreshUserData, syncCanvasState, isSessionFree])
 
   const handleDrawStart = () => {
     if (!publicKey) {
       toast.error("Please connect your wallet to draw.")
       return false
     }
+
+    // For free sessions, allow drawing without credit checks
+    if (isSessionFree) {
+      drawStartTimeRef.current = Date.now()
+      if (lineDrawTimerRef.current) {
+        clearTimeout(lineDrawTimerRef.current)
+      }
+      lineDrawTimerRef.current = setTimeout(() => {
+        if (canvasRef.current) {
+          canvasRef.current.forceStopDrawing()
+          lineDrawTimerRef.current = null
+        }
+      }, 5000)
+      return true
+    }
+
     if (credits.paidLines + credits.freeLines < 1) {
       toast.error("You are out of line credits!")
       return false
@@ -223,7 +243,9 @@ function DrawPageContent({ params }: { params: { code: string } }) {
         canvasRef.current?.removeOptimisticDrawing(tempId)
         pendingDrawingsRef.current.delete(tempId)
         toast.error("Failed to save drawing after multiple attempts. Please check your connection.")
-        await refreshUserData()
+        if (!isSessionFree) {
+          await refreshUserData()
+        }
         return
       }
 
@@ -244,7 +266,7 @@ function DrawPageContent({ params }: { params: { code: string } }) {
         setTimeout(() => retryFailedDrawing(tempId), 2000 * pending.retryCount)
       }
     },
-    [session, publicKey, refreshUserData],
+    [session, publicKey, refreshUserData, isSessionFree],
   )
 
   const handleDrawEnd = async (line: Omit<Drawing["drawing_data"], "drawer_wallet_address">) => {
@@ -273,7 +295,11 @@ function DrawPageContent({ params }: { params: { code: string } }) {
     }
 
     canvasRef.current?.addOptimisticDrawing(optimisticDrawing)
-    setCredits((p) => (p.freeLines > 0 ? { ...p, freeLines: p.freeLines - 1 } : { ...p, paidLines: p.paidLines - 1 }))
+
+    // Only deduct credits for paid sessions
+    if (!isSessionFree) {
+      setCredits((p) => (p.freeLines > 0 ? { ...p, freeLines: p.freeLines - 1 } : { ...p, paidLines: p.paidLines - 1 }))
+    }
 
     const serverPromise = recordDrawingAction(publicKey.toBase58(), session.id, line)
 
@@ -296,7 +322,7 @@ function DrawPageContent({ params }: { params: { code: string } }) {
   }
 
   const handleNuke = async (animation: NukeAnimation) => {
-    if (!publicKey || !wallet || !sendTransaction || !session) {
+    if (!publicKey || !session) {
       toast.error("Wallet not fully connected or session invalid.")
       return
     }
@@ -305,7 +331,13 @@ function DrawPageContent({ params }: { params: { code: string } }) {
     let signature: string | undefined = undefined
 
     try {
-      if (animation.id !== "free_nuke") {
+      // For free sessions, allow any nuke without payment
+      if (!isSessionFree && animation.id !== "free_nuke") {
+        if (!wallet || !sendTransaction) {
+          toast.error("Wallet not fully connected.")
+          return
+        }
+
         const rpcHost = process.env.NEXT_PUBLIC_SOLANA_RPC_HOST
         if (!rpcHost) {
           throw new Error("Solana RPC host is not configured.")
@@ -330,7 +362,9 @@ function DrawPageContent({ params }: { params: { code: string } }) {
 
       if (result.success) {
         setIsNukeDialogOpen(false)
-        await refreshUserData()
+        if (!isSessionFree) {
+          await refreshUserData()
+        }
       } else {
         toast.error("Failed to trigger nuke.", { description: result.error })
       }
@@ -393,6 +427,13 @@ function DrawPageContent({ params }: { params: { code: string } }) {
         <div className="flex items-center gap-2 rounded-full bg-black/50 px-4 py-2 text-white">
           <Edit className="h-5 w-5 text-neon-pink" />
           <span className="font-bold">DRAWING MODE</span>
+          {isSessionFree && (
+            <>
+              <span className="text-gray-400">•</span>
+              <Heart className="h-4 w-4 text-green-400" />
+              <span className="text-green-400 font-bold">FREE SESSION</span>
+            </>
+          )}
         </div>
         <div className="rounded-full bg-black/50 px-3 py-2">
           <ConnectionIndicator />
@@ -421,11 +462,13 @@ function DrawPageContent({ params }: { params: { code: string } }) {
           <BrushSizePicker size={brushSize} onSizeChange={setBrushSize} />
         </div>
         <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2 rounded-full bg-gray-800 px-4 py-2 text-white">
-            <Rocket className="h-5 w-5 text-neon-pink" />
-            <span className="font-bold">{credits.paidLines + credits.freeLines}</span>
-            {credits.freeLines > 0 && <span className="text-xs text-green-400">({credits.freeLines} free)</span>}
-          </div>
+          {!isSessionFree && (
+            <div className="flex items-center gap-2 rounded-full bg-gray-800 px-4 py-2 text-white">
+              <Rocket className="h-5 w-5 text-neon-pink" />
+              <span className="font-bold">{credits.paidLines + credits.freeLines}</span>
+              {credits.freeLines > 0 && <span className="text-xs text-green-400">({credits.freeLines} free)</span>}
+            </div>
+          )}
           <Button
             variant="destructive"
             className="bg-neon-cyan text-white hover:bg-neon-cyan/90"
@@ -433,31 +476,34 @@ function DrawPageContent({ params }: { params: { code: string } }) {
             disabled={!publicKey}
           >
             <Bomb className="mr-2 h-4 w-4" />
-            Nuke Board
+            {isSessionFree ? "Clear Board" : "Nuke Board"}
           </Button>
-          <Dialog>
-            <DialogTrigger asChild>
-              <Button className="bg-neon-pink text-white hover:bg-neon-pink/90" disabled={!publicKey}>
-                Buy Lines
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-3xl border-border/40 bg-deep-space">
-              <DialogHeader>
-                <DialogTitle>Purchase Line Credits</DialogTitle>
-                <DialogDescription>
-                  Purchase line credits using SOL to continue interacting with the board.
-                </DialogDescription>
-              </DialogHeader>
-              <PurchaseCredits onPurchaseSuccess={refreshUserData} />
-            </DialogContent>
-          </Dialog>
+          {!isSessionFree && (
+            <Dialog>
+              <DialogTrigger asChild>
+                <Button className="bg-neon-pink text-white hover:bg-neon-pink/90" disabled={!publicKey}>
+                  Buy Lines
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-3xl border-border/40 bg-deep-space">
+                <DialogHeader>
+                  <DialogTitle>Purchase Line Credits</DialogTitle>
+                  <DialogDescription>
+                    Purchase line credits using SOL to continue interacting with the board.
+                  </DialogDescription>
+                </DialogHeader>
+                <PurchaseCredits onPurchaseSuccess={refreshUserData} />
+              </DialogContent>
+            </Dialog>
+          )}
         </div>
       </div>
       <NukeSelectionDialog
         isOpen={isNukeDialogOpen}
         onOpenChange={setIsNukeDialogOpen}
         onNuke={handleNuke}
-        freeNukeCount={credits.freeNukes}
+        freeNukeCount={isSessionFree ? 999 : credits.freeNukes} // Show unlimited for free sessions
+        isSessionFree={isSessionFree}
       />
     </main>
   )

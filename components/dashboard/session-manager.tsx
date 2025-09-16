@@ -28,14 +28,16 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { PlusCircle, Loader2, Copy, Eye, LinkIcon, Trash2 } from "lucide-react"
-import { createSession, deleteSession } from "@/app/actions"
+import { Switch } from "@/components/ui/switch"
+import { PlusCircle, Loader2, Copy, Eye, LinkIcon, Trash2, DollarSign, Heart } from "lucide-react"
+import { createSession, deleteSession, toggleSessionFreeStatus } from "@/app/actions"
 import Link from "next/link"
 
 type Session = {
   id: string
   short_code: string
   is_active: boolean
+  is_free?: boolean
   created_at: string
 }
 
@@ -48,7 +50,9 @@ export function SessionManager({ initialSessions }: SessionManagerProps) {
   const [sessions, setSessions] = useState(initialSessions)
   const [isCreating, setIsCreating] = useState(false)
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null)
+  const [togglingSessionId, setTogglingSessionId] = useState<string | null>(null)
   const [sessionName, setSessionName] = useState("")
+  const [isFreeSession, setIsFreeSession] = useState(false)
   const [isDialogOpen, setIsDialogOpen] = useState(false)
 
   const handleCreateSession = async (e: React.FormEvent) => {
@@ -59,11 +63,12 @@ export function SessionManager({ initialSessions }: SessionManagerProps) {
     }
     setIsCreating(true)
     try {
-      const result = await createSession(publicKey.toBase58(), sessionName)
+      const result = await createSession(publicKey.toBase58(), sessionName, isFreeSession)
       if (result.success && result.data) {
         toast.success(`Session "${result.data.short_code}" created!`)
         setSessions((prev) => [result.data, ...prev])
         setSessionName("")
+        setIsFreeSession(false)
         setIsDialogOpen(false)
       } else {
         toast.error("Failed to create session", { description: result.error })
@@ -96,6 +101,27 @@ export function SessionManager({ initialSessions }: SessionManagerProps) {
     }
   }
 
+  const handleToggleFreeStatus = async (sessionId: string, currentStatus: boolean) => {
+    if (!publicKey) {
+      toast.error("Wallet not connected.")
+      return
+    }
+    setTogglingSessionId(sessionId)
+    try {
+      const result = await toggleSessionFreeStatus(sessionId, publicKey.toBase58(), !currentStatus)
+      if (result.success) {
+        toast.success(`Session ${!currentStatus ? "set to free" : "set to paid"}`)
+        setSessions((prev) => prev.map((s) => (s.id === sessionId ? { ...s, is_free: !currentStatus } : s)))
+      } else {
+        toast.error("Failed to update session", { description: result.error })
+      }
+    } catch (error: any) {
+      toast.error("An unexpected error occurred", { description: error.message })
+    } finally {
+      setTogglingSessionId(null)
+    }
+  }
+
   const copyToClipboard = (text: string, message: string) => {
     navigator.clipboard.writeText(text)
     toast.success(message)
@@ -119,7 +145,7 @@ export function SessionManager({ initialSessions }: SessionManagerProps) {
             <DialogHeader>
               <DialogTitle>Create a new session</DialogTitle>
               <DialogDescription>
-                Give your session a unique name. A random code will be appended to it.
+                Give your session a unique name and choose if it should be free or paid.
               </DialogDescription>
             </DialogHeader>
             <form onSubmit={handleCreateSession}>
@@ -137,6 +163,17 @@ export function SessionManager({ initialSessions }: SessionManagerProps) {
                     required
                   />
                 </div>
+                <div className="grid grid-cols-4 items-center gap-4">
+                  <Label htmlFor="free-session" className="text-right">
+                    Free Session
+                  </Label>
+                  <div className="col-span-3 flex items-center space-x-2">
+                    <Switch id="free-session" checked={isFreeSession} onCheckedChange={setIsFreeSession} />
+                    <Label htmlFor="free-session" className="text-sm text-muted-foreground">
+                      {isFreeSession ? "Viewers can draw for free" : "Viewers need credits to draw"}
+                    </Label>
+                  </div>
+                </div>
               </div>
               <div className="flex justify-end">
                 <Button type="submit" disabled={isCreating}>
@@ -153,6 +190,7 @@ export function SessionManager({ initialSessions }: SessionManagerProps) {
           <TableHeader>
             <TableRow>
               <TableHead className="text-white">Session Code</TableHead>
+              <TableHead className="text-white">Type</TableHead>
               <TableHead className="text-white">Status</TableHead>
               <TableHead className="text-white">Created</TableHead>
               <TableHead className="text-right text-white">Actions</TableHead>
@@ -172,6 +210,32 @@ export function SessionManager({ initialSessions }: SessionManagerProps) {
                         onClick={() => copyToClipboard(session.short_code, "Session code copied!")}
                       >
                         <Copy className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1">
+                        {session.is_free ? (
+                          <>
+                            <Heart className="h-4 w-4 text-green-400" />
+                            <span className="text-green-400 font-medium">Free</span>
+                          </>
+                        ) : (
+                          <>
+                            <DollarSign className="h-4 w-4 text-yellow-400" />
+                            <span className="text-yellow-400 font-medium">Paid</span>
+                          </>
+                        )}
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 px-2 text-xs"
+                        onClick={() => handleToggleFreeStatus(session.id, session.is_free || false)}
+                        disabled={togglingSessionId === session.id}
+                      >
+                        {togglingSessionId === session.id ? <Loader2 className="h-3 w-3 animate-spin" /> : "Toggle"}
                       </Button>
                     </div>
                   </TableCell>
@@ -259,7 +323,7 @@ export function SessionManager({ initialSessions }: SessionManagerProps) {
               ))
             ) : (
               <TableRow>
-                <TableCell colSpan={4} className="text-center text-muted-foreground">
+                <TableCell colSpan={5} className="text-center text-muted-foreground">
                   You haven't created any sessions yet.
                 </TableCell>
               </TableRow>
