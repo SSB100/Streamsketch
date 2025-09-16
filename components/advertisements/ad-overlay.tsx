@@ -88,18 +88,6 @@ export function AdOverlay({ customAd }: AdOverlayProps) {
     }
   }, [countdown, showAd, currentAd, closeAd])
 
-  // Force close ad after 20 seconds as failsafe
-  useEffect(() => {
-    if (showAd) {
-      const failsafeTimer = setTimeout(() => {
-        console.log("[AdOverlay] Failsafe timer triggered, closing ad")
-        closeAd()
-      }, 20000) // 20 second failsafe
-
-      return () => clearTimeout(failsafeTimer)
-    }
-  }, [showAd, closeAd])
-
   if (!showAd || !currentAd) return null
 
   return (
@@ -129,23 +117,12 @@ export function AdOverlay({ customAd }: AdOverlayProps) {
             autoPlay
             muted
             onEnded={closeAd}
-            onError={() => {
-              console.warn("[AdOverlay] Video failed to load, closing ad")
-              closeAd()
-            }}
             className="max-h-[90vh] max-w-[90vw] object-contain"
           />
         ) : (
           <img
             src={currentAd.filePath || "/placeholder.svg"}
             alt="Advertisement"
-            onError={() => {
-              console.warn("[AdOverlay] Image failed to load, closing ad")
-              closeAd()
-            }}
-            onLoad={() => {
-              console.log("[AdOverlay] Image loaded successfully")
-            }}
             className="max-h-[90vh] max-w-[90vw] object-contain"
           />
         )}

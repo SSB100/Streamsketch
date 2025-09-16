@@ -34,14 +34,6 @@ export function NukeAnimationOverlay({ nukeEvent }: NukeAnimationOverlayProps) {
     setIsVisible(false)
   }
 
-  const handleVideoError = () => {
-    console.warn(`[NukeAnimation] Video failed to load: ${nukeEvent?.animationId}`)
-    // Hide overlay after 3 seconds if video fails to load
-    setTimeout(() => {
-      setIsVisible(false)
-    }, 3000)
-  }
-
   if (!isVisible || !nukeEvent) {
     return null
   }
@@ -57,9 +49,7 @@ export function NukeAnimationOverlay({ nukeEvent }: NukeAnimationOverlayProps) {
           autoPlay
           muted
           playsInline
-          onEnded={handleVideoEnd}
-          onError={handleVideoError}
-          onLoadStart={() => console.log(`[NukeAnimation] Loading video: ${animation.video}`)}
+          onEnded={handleVideoEnd} // Hide overlay when video finishes
           className="absolute h-full w-full object-cover"
         />
       )}
