@@ -1,275 +1,286 @@
-import Link from "next/link"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Leaderboard } from "@/components/leaderboard"
+"use client"
+
+import { useRouter } from "next/navigation"
+import React, { useEffect } from "react"
 import { Header } from "@/components/header"
-import { Palette, Users, Zap, Trophy, Rocket, Monitor, Tv, Projector, Gift, Heart, ArrowRight } from "lucide-react"
+import { Leaderboard } from "@/components/leaderboard"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { ArrowRight, Users, Zap, Palette, TrendingUp, Monitor, Video, Tv, Gift, Heart } from "lucide-react"
+import { useWallet } from "@solana/wallet-adapter-react"
+import Link from "next/link"
 import Image from "next/image"
 
 export default function HomePage() {
+  const router = useRouter()
+  const { connected } = useWallet()
+  const [sessionCode, setSessionCode] = React.useState("")
+
+  const handleJoinSession = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (sessionCode.trim()) {
+      router.push(`/session/draw/${sessionCode.trim().toUpperCase()}`)
+    }
+  }
+
+  useEffect(() => {
+    const hash = window.location.hash
+    if (hash) {
+      // A small timeout ensures the element is available in the DOM after navigation.
+      setTimeout(() => {
+        const id = hash.replace("#", "")
+        const element = document.getElementById(id)
+        if (element) {
+          element.scrollIntoView({ behavior: "smooth" })
+        }
+      }, 100)
+    }
+  }, [])
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-deep-space via-purple-900/20 to-deep-space">
+    <div className="flex min-h-screen flex-col">
       <Header />
+      <main className="flex-1">
+        <section className="relative w-full overflow-hidden py-12 md:py-20 lg:py-24">
+          <div className="absolute inset-0 -z-10 h-full w-full bg-deep-space bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-brand-green/20 to-deep-space"></div>
+          <div className="container relative z-10">
+            <div className="mx-auto max-w-4xl text-center">
+              <h1 className="text-6xl font-extrabold tracking-tighter text-transparent sm:text-7xl md:text-8xl lg:text-9xl bg-clip-text bg-gradient-to-r from-brand-green to-brand-teal animate-gradient-pan">
+                Stream Sketch
+              </h1>
+              <h2 className="mt-2 text-3xl font-semibold tracking-tight text-white sm:text-4xl">for streamers</h2>
+              <p className="mx-auto mt-6 max-w-xl text-lg text-muted-foreground">
+                Turn your stream into a collaborative canvas. Let your viewers draw on your screen in real-time, funded
+                by micro-transactions on Solana.
+              </p>
 
-      {/* Hero Section */}
-      <section className="relative overflow-hidden px-4 py-20 sm:px-6 lg:px-8">
-        <div className="absolute inset-0 bg-gradient-to-r from-neon-cyan/10 via-transparent to-neon-pink/10" />
-        <div className="relative mx-auto max-w-7xl text-center">
-          <div className="mb-8 flex justify-center">
-            <Image
-              src="/banner.png"
-              alt="StreamSketch Banner"
-              width={400}
-              height={200}
-              className="rounded-lg shadow-2xl"
-              priority
-            />
-          </div>
-          <h1 className="mb-6 text-4xl font-extrabold tracking-tight text-white sm:text-6xl lg:text-7xl">
-            Interactive Drawing for{" "}
-            <span className="bg-gradient-to-r from-neon-cyan to-neon-pink bg-clip-text text-transparent">
-              Live Streams
-            </span>
-          </h1>
-          <p className="mx-auto mb-10 max-w-3xl text-xl text-gray-300 sm:text-2xl">
-            Let your viewers draw on a shared canvas in real-time. Create engaging, interactive experiences that bring
-            your community together.
-          </p>
-          <div className="flex flex-col gap-4 sm:flex-row sm:justify-center">
-            <Button size="lg" className="bg-neon-pink text-white hover:bg-neon-pink/90" asChild>
-              <Link href="/dashboard">
-                Start Creating <Rocket className="ml-2 h-5 w-5" />
-              </Link>
-            </Button>
-            <Button
-              size="lg"
-              variant="outline"
-              className="border-neon-cyan text-neon-cyan hover:bg-neon-cyan/10 bg-transparent"
-              asChild
-            >
-              <Link href="#how-it-works">Learn More</Link>
-            </Button>
-          </div>
-        </div>
-      </section>
-
-      {/* How It Works Section */}
-      <section id="how-it-works" className="px-4 py-20 sm:px-6 lg:px-8">
-        <div className="mx-auto max-w-7xl">
-          <div className="text-center mb-16">
-            <h2 className="text-3xl font-bold text-white sm:text-4xl lg:text-5xl mb-4">How It Works</h2>
-            <p className="text-xl text-gray-300 max-w-3xl mx-auto">
-              Simple steps to create interactive drawing experiences for your stream
-            </p>
-          </div>
-
-          <div className="grid gap-8 md:grid-cols-2 lg:grid-cols-4">
-            <Card className="bg-white/5 border-border/20 backdrop-blur-sm">
-              <CardHeader>
-                <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-neon-cyan/20">
-                  <Palette className="h-6 w-6 text-neon-cyan" />
+              {/* Revenue Share Promotional Banner */}
+              <div className="mx-auto mt-8 max-w-2xl">
+                <div className="relative overflow-hidden rounded-2xl border-2 border-yellow-400/50 bg-gradient-to-r from-yellow-400/10 via-orange-400/10 to-yellow-400/10 p-6 shadow-2xl shadow-yellow-400/20">
+                  <div className="absolute inset-0 bg-gradient-to-r from-yellow-400/5 via-transparent to-yellow-400/5 animate-pulse"></div>
+                  <div className="relative z-10 flex items-center justify-center gap-4">
+                    <div className="flex items-center justify-center rounded-full bg-yellow-400/20 p-3">
+                      <TrendingUp className="h-8 w-8 text-yellow-400" />
+                    </div>
+                    <div className="text-left">
+                      <div className="flex items-baseline gap-2">
+                        <span className="text-5xl font-black text-yellow-400">80%</span>
+                        <span className="text-xl font-bold text-white">Revenue Share</span>
+                      </div>
+                      <p className="text-sm text-yellow-100/80 font-medium">
+                        Keep 80% of all viewer payments • Instant SOL earnings
+                      </p>
+                    </div>
+                  </div>
+                  <div className="absolute -right-4 -top-4 h-24 w-24 rounded-full bg-yellow-400/10 blur-xl"></div>
+                  <div className="absolute -bottom-4 -left-4 h-32 w-32 rounded-full bg-orange-400/10 blur-xl"></div>
                 </div>
-                <CardTitle className="text-white">1. Create Session</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <CardDescription className="text-gray-300">
-                  Set up a drawing session with a unique code that your viewers can join
-                </CardDescription>
-              </CardContent>
-            </Card>
+              </div>
 
-            <Card className="bg-white/5 border-border/20 backdrop-blur-sm">
-              <CardHeader>
-                <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-neon-pink/20">
-                  <Users className="h-6 w-6 text-neon-pink" />
-                </div>
-                <CardTitle className="text-white">2. Share Link</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <CardDescription className="text-gray-300">
-                  Give your viewers the drawing link so they can participate in real-time
-                </CardDescription>
-              </CardContent>
-            </Card>
-
-            <Card className="bg-white/5 border-border/20 backdrop-blur-sm">
-              <CardHeader>
-                <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-purple-500/20">
-                  <Zap className="h-6 w-6 text-purple-400" />
-                </div>
-                <CardTitle className="text-white">3. Watch Magic</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <CardDescription className="text-gray-300">
-                  See drawings appear instantly on your stream as viewers create collaborative art
-                </CardDescription>
-              </CardContent>
-            </Card>
-
-            <Card className="bg-white/5 border-border/20 backdrop-blur-sm">
-              <CardHeader>
-                <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-green-500/20">
-                  <Trophy className="h-6 w-6 text-green-400" />
-                </div>
-                <CardTitle className="text-white">4. Earn Together</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <CardDescription className="text-gray-300">
-                  Streamers earn revenue share when viewers purchase premium features
-                </CardDescription>
-              </CardContent>
-            </Card>
-          </div>
-        </div>
-      </section>
-
-      {/* Stream Integration Section */}
-      <section className="px-4 py-20 sm:px-6 lg:px-8 bg-gradient-to-r from-purple-900/10 to-blue-900/10">
-        <div className="mx-auto max-w-7xl">
-          <div className="text-center mb-16">
-            <h2 className="text-3xl font-bold text-white sm:text-4xl lg:text-5xl mb-4">
-              Perfect for Your Stream Setup
-            </h2>
-            <p className="text-xl text-gray-300 max-w-3xl mx-auto">
-              Multiple ways to integrate StreamSketch into your streaming workflow
-            </p>
-          </div>
-
-          <div className="grid gap-8 md:grid-cols-2 lg:grid-cols-3 mb-16">
-            <Card className="bg-white/5 border-border/20 backdrop-blur-sm">
-              <CardHeader>
-                <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-green-500/20">
-                  <Monitor className="h-6 w-6 text-green-400" />
-                </div>
-                <CardTitle className="text-white">OBS Browser Source</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <CardDescription className="text-gray-300">
-                  Add the canvas as an overlay in OBS Studio. Perfect for keeping the drawing visible while you stream
-                  other content.
-                </CardDescription>
-              </CardContent>
-            </Card>
-
-            <Card className="bg-white/5 border-border/20 backdrop-blur-sm">
-              <CardHeader>
-                <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-teal-500/20">
-                  <Projector className="h-6 w-6 text-teal-400" />
-                </div>
-                <CardTitle className="text-white">Projector Background</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <CardDescription className="text-gray-300">
-                  Project the canvas behind you for an immersive experience. Great for IRL streams and interactive
-                  presentations.
-                </CardDescription>
-              </CardContent>
-            </Card>
-
-            <Card className="bg-white/5 border-border/20 backdrop-blur-sm">
-              <CardHeader>
-                <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-purple-500/20">
-                  <Tv className="h-6 w-6 text-purple-400" />
-                </div>
-                <CardTitle className="text-white">Second Screen/TV</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <CardDescription className="text-gray-300">
-                  Display on a separate monitor or TV visible in your stream. Perfect for desk setups and gaming
-                  streams.
-                </CardDescription>
-              </CardContent>
-            </Card>
-          </div>
-
-          <div className="grid gap-8 md:grid-cols-2 mb-12">
-            <Card className="bg-gradient-to-br from-neon-pink/10 to-purple-600/10 border-neon-pink/20 backdrop-blur-sm">
-              <CardHeader>
-                <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-neon-pink/20">
-                  <Gift className="h-6 w-6 text-neon-pink" />
-                </div>
-                <CardTitle className="text-white">Give Away Free Credits</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <CardDescription className="text-gray-300">
-                  Reward your loyal viewers with free drawing lines and nuke credits. Perfect for subscriber perks,
-                  donations goals, or special events.
-                </CardDescription>
-              </CardContent>
-            </Card>
-
-            <Card className="bg-gradient-to-br from-neon-cyan/10 to-green-600/10 border-neon-cyan/20 backdrop-blur-sm">
-              <CardHeader>
-                <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-neon-cyan/20">
-                  <Heart className="h-6 w-6 text-neon-cyan" />
-                </div>
-                <CardTitle className="text-white">Free Sessions Available</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <CardDescription className="text-gray-300">
-                  Create completely free sessions for community events, art challenges, or just for fun. Viewers only
-                  need the draw link to participate.
-                </CardDescription>
-              </CardContent>
-            </Card>
-          </div>
-
-          <div className="text-center">
-            <Button
-              size="lg"
-              className="bg-gradient-to-r from-neon-cyan to-neon-pink text-white hover:opacity-90"
-              asChild
-            >
-              <Link href="/dashboard">
-                Start Your First Session <ArrowRight className="ml-2 h-5 w-5" />
-              </Link>
-            </Button>
-          </div>
-        </div>
-      </section>
-
-      {/* Leaderboard Section */}
-      <section className="px-4 py-20 sm:px-6 lg:px-8">
-        <div className="mx-auto max-w-7xl">
-          <div className="text-center mb-16">
-            <h2 className="text-3xl font-bold text-white sm:text-4xl lg:text-5xl mb-4">Top Earners</h2>
-            <p className="text-xl text-gray-300 max-w-3xl mx-auto">
-              See who's leading the StreamSketch community in earnings
-            </p>
-          </div>
-          <Leaderboard />
-        </div>
-      </section>
-
-      {/* CTA Section */}
-      <section className="px-4 py-20 sm:px-6 lg:px-8 bg-gradient-to-r from-neon-cyan/10 via-purple-600/10 to-neon-pink/10">
-        <div className="mx-auto max-w-4xl text-center">
-          <h2 className="text-3xl font-bold text-white sm:text-4xl lg:text-5xl mb-6">
-            Ready to Transform Your Stream?
-          </h2>
-          <p className="text-xl text-gray-300 mb-10 max-w-2xl mx-auto">
-            Join thousands of streamers who are creating unforgettable interactive experiences with their communities.
-          </p>
-          <div className="flex flex-col gap-4 sm:flex-row sm:justify-center">
-            <Button size="lg" className="bg-neon-pink text-white hover:bg-neon-pink/90" asChild>
-              <Link href="/dashboard">
-                Get Started Now <Rocket className="ml-2 h-5 w-5" />
-              </Link>
-            </Button>
-          </div>
-        </div>
-      </section>
-
-      {/* Footer */}
-      <footer className="border-t border-border/20 px-4 py-12 sm:px-6 lg:px-8">
-        <div className="mx-auto max-w-7xl">
-          <div className="flex flex-col items-center justify-between gap-4 sm:flex-row">
-            <div className="flex items-center gap-2">
-              <Image src="/logo.png" alt="StreamSketch Logo" width={32} height={32} className="rounded" />
-              <span className="text-lg font-bold text-white">StreamSketch</span>
+              <div className="mt-8 flex flex-col items-center justify-center gap-4 sm:flex-row">
+                <Link href="/dashboard">
+                  <Button size="lg" className="w-full bg-primary text-primary-foreground hover:bg-primary/90 sm:w-auto">
+                    {connected ? "Go to Dashboard" : "Connect Wallet to Start"}
+                    <ArrowRight className="ml-2 h-4 w-4" />
+                  </Button>
+                </Link>
+                <form onSubmit={handleJoinSession} className="flex w-full gap-2 sm:w-auto">
+                  <Input
+                    type="text"
+                    placeholder="Enter Session Code"
+                    className="w-full sm:w-48"
+                    value={sessionCode}
+                    onChange={(e) => setSessionCode(e.target.value)}
+                    maxLength={25} // Increased max length for NAME-CODE format
+                    style={{ textTransform: "uppercase" }} // Visually transform text to uppercase
+                  />
+                  <Button
+                    type="submit"
+                    variant="outline"
+                    className="border-secondary text-secondary hover:bg-secondary/10 hover:text-secondary bg-transparent"
+                  >
+                    Join
+                  </Button>
+                </form>
+              </div>
+              <div className="mt-4 flex items-center justify-center gap-2 text-sm text-muted-foreground">
+                <Image src="/icons/chrome.png" alt="Chrome Logo" width={16} height={16} />
+                <span>Works best on Chrome Browser</span>
+              </div>
             </div>
-            <p className="text-sm text-gray-400">© 2024 StreamSketch. Interactive drawing for live streams.</p>
           </div>
+        </section>
+
+        <section id="how-it-works" className="py-6 md:py-8">
+          <div className="container">
+            <div className="mx-auto mb-12 max-w-2xl text-center">
+              <h2 className="text-3xl font-bold tracking-tighter text-white sm:text-4xl">How It Works</h2>
+              <p className="mt-4 text-muted-foreground">A simple, powerful way to engage your community.</p>
+            </div>
+            <div className="grid gap-8 md:grid-cols-3">
+              <Card className="border-primary/20 bg-white/5">
+                <CardHeader>
+                  <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10">
+                    <Palette className="h-6 w-6 text-primary" />
+                  </div>
+                  <CardTitle className="text-white">1. Create a Session</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <CardDescription>
+                    Connect your wallet, go to your dashboard, and start a new whiteboard session. You'll get a unique
+                    code for your viewers.
+                  </CardDescription>
+                </CardContent>
+              </Card>
+              <Card className="border-secondary/20 bg-white/5">
+                <CardHeader>
+                  <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-secondary/10">
+                    <Users className="h-6 w-6 text-secondary" />
+                  </div>
+                  <CardTitle className="text-white">2. Viewers Join & Draw</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <CardDescription>
+                    Viewers use the code to join. They purchase drawing credits with SOL to add their masterpiece to the
+                    canvas.
+                  </CardDescription>
+                </CardContent>
+              </Card>
+              <Card className="border-yellow-400/20 bg-white/5">
+                <CardHeader>
+                  <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-yellow-400/10">
+                    <Zap className="h-6 w-6 text-yellow-400" />
+                  </div>
+                  <CardTitle className="text-white">3. Earn Instantly</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <CardDescription>
+                    You earn 80% of all fees generated from drawing credits used in your session. Claim your SOL
+                    earnings anytime from your dashboard.
+                  </CardDescription>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        </section>
+
+        {/* Stream Integration Section */}
+        <section id="stream-integration" className="py-12 md:py-16 bg-gradient-to-b from-transparent to-white/5">
+          <div className="container">
+            <div className="mx-auto mb-12 max-w-3xl text-center">
+              <h2 className="text-3xl font-bold tracking-tighter text-white sm:text-4xl">
+                Perfect for Your Stream Setup
+              </h2>
+              <p className="mt-4 text-lg text-muted-foreground">
+                Multiple ways to integrate StreamSketch into your streaming workflow
+              </p>
+            </div>
+
+            <div className="grid gap-8 md:grid-cols-2 lg:grid-cols-3 mb-12">
+              <Card className="border-brand-green/20 bg-white/5">
+                <CardHeader>
+                  <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-brand-green/10">
+                    <Video className="h-6 w-6 text-brand-green" />
+                  </div>
+                  <CardTitle className="text-white">OBS Overlay</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <CardDescription>
+                    Add the canvas as a browser source overlay in OBS. Perfect for keeping your main content visible
+                    while viewers draw.
+                  </CardDescription>
+                </CardContent>
+              </Card>
+
+              <Card className="border-brand-teal/20 bg-white/5">
+                <CardHeader>
+                  <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-brand-teal/10">
+                    <Monitor className="h-6 w-6 text-brand-teal" />
+                  </div>
+                  <CardTitle className="text-white">Projector Background</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <CardDescription>
+                    Use a projector to display the canvas behind you as a dynamic, interactive background that changes
+                    with viewer participation.
+                  </CardDescription>
+                </CardContent>
+              </Card>
+
+              <Card className="border-purple-400/20 bg-white/5">
+                <CardHeader>
+                  <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-purple-400/10">
+                    <Tv className="h-6 w-6 text-purple-400" />
+                  </div>
+                  <CardTitle className="text-white">Second Screen</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <CardDescription>
+                    Run the canvas on a TV or monitor in your streaming space. Great for IRL streams or as a
+                    conversation starter.
+                  </CardDescription>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Streamer Benefits */}
+            <div className="grid gap-8 md:grid-cols-2">
+              <Card className="border-pink-400/20 bg-white/5">
+                <CardHeader>
+                  <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-pink-400/10">
+                    <Gift className="h-6 w-6 text-pink-400" />
+                  </div>
+                  <CardTitle className="text-white">Give Away Free Credits</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <CardDescription>
+                    Reward your loyal viewers! Gift free drawing lines and nuke credits directly from your dashboard.
+                    Perfect for subscriber perks, donations, or special events.
+                  </CardDescription>
+                </CardContent>
+              </Card>
+
+              <Card className="border-green-400/20 bg-white/5">
+                <CardHeader>
+                  <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-green-400/10">
+                    <Heart className="h-6 w-6 text-green-400" />
+                  </div>
+                  <CardTitle className="text-white">Free Sessions Available</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <CardDescription>
+                    Create completely free sessions for your community! Viewers can draw without paying - perfect for
+                    community events, art challenges, or just having fun together.
+                  </CardDescription>
+                </CardContent>
+              </Card>
+            </div>
+
+            <div className="mt-12 text-center">
+              <div className="mx-auto max-w-2xl rounded-2xl border border-brand-green/20 bg-gradient-to-r from-brand-green/5 to-brand-teal/5 p-8">
+                <h3 className="text-2xl font-bold text-white mb-4">Ready to Transform Your Stream?</h3>
+                <p className="text-muted-foreground mb-6">
+                  Join streamers who are already earning while entertaining their communities with interactive art
+                  experiences.
+                </p>
+                <Link href="/dashboard">
+                  <Button size="lg" className="bg-brand-green text-white hover:bg-brand-green/90">
+                    Start Your First Session
+                    <ArrowRight className="ml-2 h-4 w-4" />
+                  </Button>
+                </Link>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* Leaderboard Section */}
+        <Leaderboard />
+      </main>
+      <footer className="border-t border-border/40 py-6">
+        <div className="container text-center text-sm text-muted-foreground">
+          © {new Date().getFullYear()} StreamSketch. All rights reserved.
         </div>
       </footer>
     </div>
