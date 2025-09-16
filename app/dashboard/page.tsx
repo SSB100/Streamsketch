@@ -74,6 +74,9 @@ function DashboardContent() {
   const [isLoading, setIsLoading] = useState(true)
   const [hasError, setHasError] = useState(false)
 
+  // Get wallet address as string
+  const walletAddress = publicKey?.toBase58() || ""
+
   const refreshAllData = useCallback(async () => {
     if (!publicKey) return
 
@@ -204,7 +207,7 @@ function DashboardContent() {
         onGiftSuccess={refreshAllData}
       />
       <PurchaseCredits onPurchaseSuccess={refreshAllData} />
-      <SessionManager initialSessions={sessions} onSessionUpdate={refreshAllData} />
+      <SessionManager initialSessions={sessions} walletAddress={walletAddress} onSessionUpdate={refreshAllData} />
       <TransactionHistory />
     </div>
   )
