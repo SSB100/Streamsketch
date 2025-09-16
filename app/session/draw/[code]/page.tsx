@@ -14,14 +14,12 @@ import { useWallet } from "@solana/wallet-adapter-react"
 import { createClient } from "@/lib/supabase/client"
 import { useUser } from "@/hooks/use-user"
 import { useRealtimeChannel } from "@/hooks/use-realtime-channel"
-import { recordDrawing, purchaseNuke } from "@/app/actions"
+import { recordDrawing, purchaseNuke, getSessionData } from "@/app/actions"
 import { toast } from "sonner"
 import { Palette, Zap, Infinity } from "lucide-react"
 import { useFreeNuke } from "@/app/actions/useFreeNuke"
 import { notFound } from "next/navigation"
-import { createSupabaseServerClient } from "@/lib/supabase/server"
 import { Header } from "@/components/header"
-import { getSessionData } from "@/app/actions"
 import { Badge } from "@/components/ui/badge"
 
 interface SessionData {
@@ -44,26 +42,24 @@ interface DrawPageProps {
   }
 }
 
-export default async function DrawPage({ params }: DrawPageProps) {
-  const supabase = createSupabaseServerClient()
+export default function DrawPage({ params }: DrawPageProps) {
   const sessionCode = params.code
-
+  const [session, setSession] = useState<SessionData | null>(null)
+  const [drawings, setDrawings] = useState<any[]>([])
   const [userStats, setUserStats] = useState<UserStats>({ credits: 0, free_nukes: 0 })
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [brushSize, setBrushSize] = useState(3)
   const [brushColor, setBrushColor] = useState("#ffffff")
-  const [isDrawing, setIsDrawing] = useState(false)
   const [showNukeDialog, setShowNukeDialog] = useState(false)
   const [nukeAnimation, setNukeAnimation] = useState<{ type: string; timestamp: number } | null>(null)
   const [participantCount, setParticipantCount] = useState(0)
-  const useFreeNukeHook = useFreeNuke(sessionCode)
   const { user } = useUser()
   const router = useRouter()
   const { connected } = useWallet()
+  const useFreeNukeHook = useFreeNuke(sessionCode)
 
   const { sendMessage } = useRealtimeChannel(`session:${sessionCode}`, {
     onDrawing: (payload) => {
-      // Handle incoming drawing data
       console.log("Received drawing:", payload)
     },
     onNuke: (payload) => {
@@ -74,46 +70,39 @@ export default async function DrawPage({ params }: DrawPageProps) {
     },
   })
 
-  // Load user stats
+  // Load session data and user stats
   useEffect(() => {
-    const loadUserStats = async () => {
-      if (!user) return
-
+    const loadData = async () => {
       try {
-        const { data, error } = await createClient()
-          .from("users")
-          .select("credits, free_nukes")
-          .eq("id", user.id)
-          .single()
+        // Get session data
+        const sessionData = await getSessionData(sessionCode)
 
-        if (data) {
-          setUserStats(data)
+        if (!sessionData.session) {
+          notFound()
+          return
+        }
+
+        setSession(sessionData.session)
+        setDrawings(sessionData.drawings)
+
+        // Load user stats if user is logged in
+        if (user) {
+          const supabase = createClient()
+          const { data, error } = await supabase.from("users").select("credits, free_nukes").eq("id", user.id).single()
+
+          if (data) {
+            setUserStats(data)
+          }
         }
       } catch (error) {
-        console.error("Error loading user stats:", error)
+        console.error("Error loading data:", error)
+      } finally {
+        setLoading(false)
       }
     }
 
-    loadUserStats()
-  }, [user])
-
-  // Get session details including is_free flag and drawings
-  const { session, drawings } = await getSessionData(sessionCode)
-
-  if (!session) {
-    notFound()
-  }
-
-  if (!session.is_active) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="text-center">
-          <h1 className="text-2xl font-bold mb-2">Session Inactive</h1>
-          <p className="text-muted-foreground">This session is no longer active.</p>
-        </div>
-      </div>
-    )
-  }
+    loadData()
+  }, [sessionCode, user])
 
   const handleDrawingComplete = async (drawingData: any) => {
     if (!session || !user) return
@@ -179,8 +168,30 @@ export default async function DrawPage({ params }: DrawPageProps) {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-deep-space">
+      <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900">
         <div className="text-white">Loading session...</div>
+      </div>
+    )
+  }
+
+  if (!session) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-center">
+          <h1 className="text-2xl font-bold mb-2">Session Not Found</h1>
+          <p className="text-muted-foreground">This session does not exist.</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (!session.is_active) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-center">
+          <h1 className="text-2xl font-bold mb-2">Session Inactive</h1>
+          <p className="text-muted-foreground">This session is no longer active.</p>
+        </div>
       </div>
     )
   }
@@ -189,7 +200,7 @@ export default async function DrawPage({ params }: DrawPageProps) {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900">
-      <CustomCursor />
+      <CustomCursor color={brushColor} size={brushSize * 4} />
       <Header sessionCode={sessionCode} />
 
       {/* Free Session Indicator */}
@@ -205,88 +216,105 @@ export default async function DrawPage({ params }: DrawPageProps) {
         </div>
       )}
 
-      <main className="container mx-auto p-4 relative">
-        <Canvas
-          sessionId={session.id}
-          sessionCode={sessionCode}
-          initialDrawings={drawings}
-          isFreeSession={isFreeSession}
-        />
-      </main>
+      <div className="flex">
+        {/* Main Canvas Area */}
+        <main className="flex-1 p-4">
+          <Canvas
+            width={800}
+            height={600}
+            isDrawable={connected && !!user && (!isFreeSession ? userStats.credits > 0 : true)}
+            initialDrawings={drawings}
+            onDrawStart={() => {
+              if (!connected || !user) {
+                toast.error("Please connect your wallet to draw")
+                return false
+              }
+              if (!isFreeSession && userStats.credits <= 0) {
+                toast.error("No credits remaining")
+                return false
+              }
+              return true
+            }}
+            onDrawEnd={handleDrawingComplete}
+            color={brushColor}
+            lineWidth={brushSize}
+          />
+        </main>
 
-      {/* Sidebar */}
-      <div className="w-80 border-l border-white/10 bg-black/20 p-4 fixed top-0 right-0 h-full">
-        <div className="space-y-6">
-          {/* User Stats */}
-          {connected && user && (
-            <Card className="bg-white/5 border-white/10">
-              <CardContent className="p-4">
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium text-white/70">Drawing Credits</span>
-                    {isFreeSession ? (
-                      <div className="flex items-center gap-1 text-green-400">
-                        <Infinity className="h-4 w-4" />
-                        <span className="font-semibold">UNLIMITED LINES</span>
+        {/* Sidebar */}
+        <div className="w-80 border-l border-white/10 bg-black/20 p-4">
+          <div className="space-y-6">
+            {/* User Stats */}
+            {connected && user && (
+              <Card className="bg-white/5 border-white/10">
+                <CardContent className="p-4">
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium text-white/70">Drawing Credits</span>
+                      {isFreeSession ? (
+                        <div className="flex items-center gap-1 text-green-400">
+                          <Infinity className="h-4 w-4" />
+                          <span className="font-semibold">UNLIMITED</span>
+                        </div>
+                      ) : (
+                        <span className="font-semibold text-white">{userStats.credits}</span>
+                      )}
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium text-white/70">Free Nukes</span>
+                      <span className="font-semibold text-white">{userStats.free_nukes}</span>
+                    </div>
+                    {!isFreeSession && userStats.credits === 0 && (
+                      <div className="text-xs text-yellow-400">
+                        Need more credits? Visit your dashboard to purchase more.
                       </div>
-                    ) : (
-                      <span className="font-semibold text-white">{userStats.credits}</span>
                     )}
                   </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium text-white/70">Free Nukes</span>
-                    <span className="font-semibold text-white">{userStats.free_nukes}</span>
-                  </div>
-                  {!isFreeSession && userStats.credits === 0 && (
-                    <div className="text-xs text-yellow-400">
-                      Need more credits? Visit your dashboard to purchase more.
-                    </div>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          )}
+                </CardContent>
+              </Card>
+            )}
 
-          {/* Drawing Tools */}
-          <Card className="bg-white/5 border-white/10">
-            <CardContent className="p-4">
-              <div className="space-y-4">
-                <div>
-                  <label className="text-sm font-medium text-white/70">Brush Size</label>
-                  <BrushSizePicker value={brushSize} onChange={setBrushSize} />
-                </div>
-                <div>
-                  <label className="text-sm font-medium text-white/70">Color</label>
-                  <ColorPicker value={brushColor} onChange={setBrushColor} />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Actions */}
-          {connected && user && (
-            <div className="space-y-2">
-              <Button
-                onClick={() => setShowNukeDialog(true)}
-                className="w-full bg-red-600 hover:bg-red-700"
-                disabled={userStats.credits === 0 && userStats.free_nukes === 0}
-              >
-                <Zap className="mr-2 h-4 w-4" />
-                Activate Nuke
-              </Button>
-            </div>
-          )}
-
-          {!connected && (
-            <Card className="bg-yellow-500/10 border-yellow-500/20">
+            {/* Drawing Tools */}
+            <Card className="bg-white/5 border-white/10">
               <CardContent className="p-4">
-                <div className="text-center">
-                  <Palette className="mx-auto mb-2 h-8 w-8 text-yellow-400" />
-                  <p className="text-sm text-yellow-200">Connect your wallet to start drawing!</p>
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-sm font-medium text-white/70 block mb-2">Brush Size</label>
+                    <BrushSizePicker value={brushSize} onChange={setBrushSize} />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-white/70 block mb-2">Color</label>
+                    <ColorPicker value={brushColor} onChange={setBrushColor} />
+                  </div>
                 </div>
               </CardContent>
             </Card>
-          )}
+
+            {/* Actions */}
+            {connected && user && (
+              <div className="space-y-2">
+                <Button
+                  onClick={() => setShowNukeDialog(true)}
+                  className="w-full bg-red-600 hover:bg-red-700"
+                  disabled={userStats.credits === 0 && userStats.free_nukes === 0}
+                >
+                  <Zap className="mr-2 h-4 w-4" />
+                  Activate Nuke
+                </Button>
+              </div>
+            )}
+
+            {!connected && (
+              <Card className="bg-yellow-500/10 border-yellow-500/20">
+                <CardContent className="p-4">
+                  <div className="text-center">
+                    <Palette className="mx-auto mb-2 h-8 w-8 text-yellow-400" />
+                    <p className="text-sm text-yellow-200">Connect your wallet to start drawing!</p>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+          </div>
         </div>
       </div>
 

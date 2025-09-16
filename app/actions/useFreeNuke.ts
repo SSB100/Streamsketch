@@ -1,27 +1,43 @@
 "use server"
 
-import { createSupabaseAdminClient } from "@/lib/supabase/admin"
+import { createSupabaseServerClient } from "@/lib/supabase/server"
 import { revalidatePath } from "next/cache"
 
-export async function useFreeNuke(sessionCode: string, nukeType: string) {
-  try {
-    const supabase = createSupabaseAdminClient()
+export async function useFreeNuke(sessionCode: string) {
+  return async (nukeType: string) => {
+    const supabase = createSupabaseServerClient()
 
-    // Call the RPC function to use a free nuke
-    const { data, error } = await supabase.rpc("use_free_nuke", {
-      p_session_code: sessionCode,
-      p_nuke_type: nukeType,
-    })
+    try {
+      // Get current user
+      const {
+        data: { user },
+        error: authError,
+      } = await supabase.auth.getUser()
+      if (authError || !user) {
+        return { success: false, error: "Authentication required" }
+      }
 
-    if (error) {
-      console.error("Error using free nuke:", error)
-      return { success: false, error: error.message }
+      // Call the free nuke RPC function
+      const { data, error } = await supabase.rpc("use_free_nuke", {
+        p_session_code: sessionCode,
+        p_nuke_type: nukeType,
+        p_user_id: user.id,
+      })
+
+      if (error) {
+        console.error("Free nuke error:", error)
+        return { success: false, error: error.message }
+      }
+
+      if (!data.success) {
+        return { success: false, error: data.error }
+      }
+
+      revalidatePath(`/session/draw/${sessionCode}`)
+      return { success: true, free_nukes_remaining: data.free_nukes_remaining }
+    } catch (error) {
+      console.error("Free nuke action error:", error)
+      return { success: false, error: "Failed to use free nuke" }
     }
-
-    revalidatePath("/dashboard")
-    return { success: true, data }
-  } catch (error) {
-    console.error("Error in useFreeNuke:", error)
-    return { success: false, error: "Internal server error" }
   }
 }

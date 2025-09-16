@@ -2,7 +2,6 @@
 
 import { revalidatePath } from "next/cache"
 import { createSupabaseAdminClient, createSupabaseServerClient } from "@/lib/supabase/admin"
-import type { Drawing } from "@/lib/types"
 import { STREAMER_REVENUE_SHARE, APP_WALLET_ADDRESS } from "@/lib/constants"
 import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram, Transaction } from "@solana/web3.js"
 import bs58 from "bs58"
@@ -155,16 +154,26 @@ export async function getUserSessions(walletAddress: string) {
   return data
 }
 
-export async function getTransactionHistory(walletAddress: string) {
-  const admin = createSupabaseAdminClient()
-  const { data, error } = await admin
-    .from("transactions")
-    .select("id, transaction_type, sol_amount, credit_amount, notes, created_at, signature")
-    .eq("user_wallet_address", walletAddress)
-    .order("created_at", { ascending: false })
-    .limit(50)
-  if (error) throw new Error(error.message)
-  return data
+export async function getTransactionHistory(userId: string) {
+  const supabase = createSupabaseServerClient()
+
+  try {
+    const { data, error } = await supabase
+      .from("transactions")
+      .select("*")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+
+    if (error) {
+      console.error("Get transaction history error:", error)
+      return { success: false, error: error.message, transactions: [] }
+    }
+
+    return { success: true, transactions: data || [] }
+  } catch (error) {
+    console.error("Get transaction history action error:", error)
+    return { success: false, error: "Failed to get transaction history", transactions: [] }
+  }
 }
 
 export async function createSession(walletAddress: string, sessionName: string, isFree = false) {
@@ -296,21 +305,115 @@ export async function processCreditPurchase(
 // Add the missing purchaseCredits export (alias for processCreditPurchase)
 export const purchaseCredits = processCreditPurchase
 
-export async function getSessionData(shortCode: string) {
-  const supabase = createSupabaseAdminClient()
-  const { data: session, error: sessionError } = await supabase
-    .from("sessions")
-    .select("id, owner_wallet_address, is_free")
-    .eq("short_code", shortCode)
-    .single()
-  if (sessionError || !session) return { session: null, drawings: [] }
-  const { data: drawings, error: drawingsError } = await supabase
-    .from("drawings")
-    .select("id, drawing_data, drawer_wallet_address, created_at") // Ensure created_at is selected
-    .eq("session_id", session.id)
-    .order("id", { ascending: true })
-  if (drawingsError) throw new Error(drawingsError.message)
-  return { session, drawings: drawings as Drawing[] }
+export async function getSessionData(sessionCode: string) {
+  const supabase = createSupabaseServerClient()
+
+  try {
+    // Get session details
+    const { data: session, error: sessionError } = await supabase
+      .from("sessions")
+      .select("*")
+      .eq("code", sessionCode)
+      .single()
+
+    if (sessionError || !session) {
+      return { session: null, drawings: [] }
+    }
+
+    // Get drawings for this session
+    const { data: drawings, error: drawingsError } = await supabase
+      .from("drawings")
+      .select("*")
+      .eq("session_id", session.id)
+      .order("created_at", { ascending: true })
+
+    return {
+      session,
+      drawings: drawings || [],
+    }
+  } catch (error) {
+    console.error("Error fetching session data:", error)
+    return { session: null, drawings: [] }
+  }
+}
+
+export async function recordDrawingAction(sessionCode: string, drawingData: any) {
+  const supabase = createSupabaseServerClient()
+
+  try {
+    // Get current user
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser()
+    if (authError || !user) {
+      return { success: false, error: "Authentication required" }
+    }
+
+    // Call the record drawing RPC function
+    const { data, error } = await supabase.rpc("record_drawing_with_free_session_support", {
+      p_session_code: sessionCode,
+      p_drawing_data: drawingData,
+      p_user_id: user.id,
+    })
+
+    if (error) {
+      console.error("Record drawing error:", error)
+      return { success: false, error: error.message }
+    }
+
+    if (!data.success) {
+      return { success: false, error: data.error }
+    }
+
+    revalidatePath(`/session/draw/${sessionCode}`)
+    return {
+      success: true,
+      lines_drawn: data.lines_drawn,
+      credits_remaining: data.credits_remaining,
+      is_free_session: data.is_free_session,
+    }
+  } catch (error) {
+    console.error("Record drawing action error:", error)
+    return { success: false, error: "Failed to record drawing" }
+  }
+}
+
+export async function purchaseNuke(sessionCode: string, nukeType: string) {
+  const supabase = createSupabaseServerClient()
+
+  try {
+    // Get current user
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser()
+    if (authError || !user) {
+      return { success: false, error: "Authentication required" }
+    }
+
+    // Call the purchase nuke RPC function
+    const { data, error } = await supabase.rpc("purchase_nuke", {
+      p_session_code: sessionCode,
+      p_nuke_type: nukeType,
+      p_user_id: user.id,
+    })
+
+    if (error) {
+      console.error("Purchase nuke error:", error)
+      return { success: false, error: error.message }
+    }
+
+    if (!data.success) {
+      return { success: false, error: data.error }
+    }
+
+    revalidatePath(`/session/draw/${sessionCode}`)
+    return { success: true, credits_remaining: data.credits_remaining }
+  } catch (error) {
+    console.error("Purchase nuke action error:", error)
+    return { success: false, error: "Failed to purchase nuke" }
+  }
 }
 
 export async function claimRevenueAction(prevState: any, formData: FormData) {
@@ -481,43 +584,6 @@ export async function getUserFreeCreditSessions(userWallet: string) {
   }
 }
 
-export async function recordDrawingAction(
-  drawerWalletAddress: string,
-  sessionId: string,
-  drawingData: { points: any[]; color: string; lineWidth: number },
-) {
-  const supabase = createSupabaseAdminClient()
-  await ensureUser(drawerWalletAddress)
-
-  // Use the new function that supports free sessions
-  const { data: newDrawings, error } = await supabase.rpc("record_drawing_with_free_session_support", {
-    p_drawer_wallet_address: drawerWalletAddress,
-    p_session_id: sessionId,
-    p_drawing_data: drawingData,
-  })
-
-  if (error) {
-    console.error("Failed to record drawing:", error)
-    return { success: false, error: error.message }
-  }
-  const newDrawing = newDrawings && newDrawings.length > 0 ? newDrawings[0] : null
-  if (newDrawing) {
-    supabase
-      .channel(`session-${sessionId}`)
-      .send({
-        type: "broadcast",
-        event: "draw",
-        payload: { drawing: newDrawing },
-      })
-      .catch((err) => console.error(`[Realtime Broadcast Failed] Event: draw, Session: ${sessionId}`, err))
-  }
-  revalidatePath("/dashboard")
-  return { success: true }
-}
-
-// Add the missing recordDrawing export (alias for recordDrawingAction)
-export const recordDrawing = recordDrawingAction
-
 export async function initiateNukeAction(
   nukerWalletAddress: string,
   sessionId: string,
@@ -591,39 +657,7 @@ export async function initiateNukeAction(
 }
 
 // Add the missing purchaseNuke export (alias for initiateNukeAction)
-export async function purchaseNuke(sessionCode: string, nukeType: string, txSignature?: string) {
-  try {
-    const supabase = createSupabaseAdminClient()
-
-    // Get session data first
-    const { data: session, error: sessionError } = await supabase
-      .from("sessions")
-      .select("id")
-      .eq("short_code", sessionCode)
-      .single()
-
-    if (sessionError || !session) {
-      return { success: false, error: "Session not found" }
-    }
-
-    // Find the nuke animation by type
-    const { NUKE_ANIMATIONS } = await import("@/lib/nuke-animations")
-    const nukeAnimation = NUKE_ANIMATIONS.find((nuke) => nuke.id === nukeType)
-
-    if (!nukeAnimation) {
-      return { success: false, error: "Invalid nuke type" }
-    }
-
-    // Get current user wallet (this would need to be passed or retrieved from auth)
-    // For now, we'll assume it's passed in the session or context
-    const walletAddress = "placeholder" // This should be retrieved from auth context
-
-    return await initiateNukeAction(walletAddress, session.id, nukeAnimation, txSignature)
-  } catch (error) {
-    console.error("Error in purchaseNuke:", error)
-    return { success: false, error: "Internal server error" }
-  }
-}
+export const purchaseNukeAlias = initiateNukeAction
 
 // New leaderboard functions
 export async function getLeaderboard() {
@@ -680,3 +714,6 @@ export async function getDashboardData() {
     return { success: false, error: `Failed to fetch data: ${error.message}` }
   }
 }
+
+// Export aliases for compatibility
+export const recordDrawing = recordDrawingAction
