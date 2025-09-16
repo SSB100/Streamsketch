@@ -282,6 +282,9 @@ export async function processCreditPurchase(
   return { success: true, message: `${creditPackage.lines} line credits added successfully!` }
 }
 
+// Add the missing purchaseCredits export (alias for processCreditPurchase)
+export const purchaseCredits = processCreditPurchase
+
 export async function getSessionData(shortCode: string) {
   const supabase = createSupabaseAdminClient()
   const { data: session, error: sessionError } = await supabase
@@ -298,6 +301,7 @@ export async function getSessionData(shortCode: string) {
   if (drawingsError) throw new Error(drawingsError.message)
   return { session, drawings: drawings as Drawing[] }
 }
+
 export async function claimRevenueAction(prevState: any, formData: FormData) {
   const supabase = createSupabaseAdminClient()
   const streamerWallet = formData.get("streamer_wallet") as string
@@ -382,6 +386,7 @@ export async function claimRevenueAction(prevState: any, formData: FormData) {
     }
   }
 }
+
 export async function deleteSession(sessionId: string, walletAddress: string) {
   const admin = createSupabaseAdminClient()
   const { data: session, error: fetchError } = await admin
@@ -397,6 +402,7 @@ export async function deleteSession(sessionId: string, walletAddress: string) {
   revalidatePath("/dashboard")
   return { success: true }
 }
+
 export async function giftCreditsToSessionAction(
   ownerWallet: string,
   sessionId: string,
@@ -424,6 +430,7 @@ export async function giftCreditsToSessionAction(
   revalidatePath("/dashboard")
   return { success: true, message: data }
 }
+
 export async function getFreeCreditsForSession(userWallet: string, sessionId: string) {
   const admin = createSupabaseAdminClient()
   try {
@@ -445,6 +452,7 @@ export async function getFreeCreditsForSession(userWallet: string, sessionId: st
     return { freeLines: 0, freeNukes: 0 }
   }
 }
+
 export async function getUserFreeCreditSessions(userWallet: string) {
   const admin = createSupabaseAdminClient()
   try {
@@ -461,6 +469,7 @@ export async function getUserFreeCreditSessions(userWallet: string) {
     return []
   }
 }
+
 export async function recordDrawingAction(
   drawerWalletAddress: string,
   sessionId: string,

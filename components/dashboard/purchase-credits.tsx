@@ -1,36 +1,34 @@
 "use client"
 
 import { useState } from "react"
-import { useWallet, useConnection } from "@solana/wallet-adapter-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Rocket, Loader2, Zap } from "lucide-react"
+import { Coins, Zap } from "lucide-react"
 import { PURCHASE_PACKAGES } from "@/lib/packages"
+import { useWallet } from "@solana/wallet-adapter-react"
+import { Connection, SystemProgram, Transaction, LAMPORTS_PER_SOL } from "@solana/web3.js"
+import { APP_WALLET_ADDRESS } from "@/lib/constants"
 import { processCreditPurchase } from "@/app/actions"
 import { toast } from "sonner"
-import { LAMPORTS_PER_SOL, SystemProgram, Transaction } from "@solana/web3.js"
-import { APP_WALLET_ADDRESS } from "@/lib/constants"
 
-interface PurchaseCreditsProps {
-  onPurchaseSuccess?: () => void
-}
-
-export function PurchaseCredits({ onPurchaseSuccess }: PurchaseCreditsProps) {
+export function PurchaseCredits() {
   const { publicKey, sendTransaction } = useWallet()
-  const { connection } = useConnection()
-  const [purchasingPackage, setPurchasingPackage] = useState<string | null>(null)
+  const [isProcessing, setIsProcessing] = useState<string | null>(null)
 
-  const handlePurchase = async (packageId: keyof typeof PURCHASE_PACKAGES) => {
-    if (!publicKey || !sendTransaction) {
-      toast.error("Please connect your wallet first.")
+  const handlePurchase = async (packageId: "small" | "large") => {
+    if (!publicKey) {
+      toast.error("Please connect your wallet first")
       return
     }
 
-    const creditPackage = PURCHASE_PACKAGES[packageId]
-    setPurchasingPackage(packageId)
+    setIsProcessing(packageId)
 
     try {
+      const creditPackage = PURCHASE_PACKAGES[packageId]
+      const rpcHost = process.env.NEXT_PUBLIC_SOLANA_RPC_HOST || "https://api.devnet.solana.com"
+      const connection = new Connection(rpcHost, "confirmed")
+
       // Create transaction
       const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash()
       const transaction = new Transaction({
@@ -46,70 +44,71 @@ export function PurchaseCredits({ onPurchaseSuccess }: PurchaseCreditsProps) {
 
       // Send transaction
       const signature = await sendTransaction(transaction, connection)
+
+      // Wait for confirmation
       await connection.confirmTransaction({ signature, lastValidBlockHeight, blockhash })
 
       // Process the purchase on the backend
       const result = await processCreditPurchase(publicKey.toBase58(), signature, packageId)
 
       if (result.success) {
-        toast.success("Purchase successful!", {
-          description: result.message,
-          action: {
-            label: "View on Solscan",
-            onClick: () => window.open(`https://solscan.io/tx/${signature}?cluster=devnet`, "_blank"),
-          },
-        })
-        onPurchaseSuccess?.()
+        toast.success(result.message)
       } else {
-        toast.error("Purchase failed", { description: result.error })
+        toast.error(result.error)
       }
     } catch (error: any) {
       console.error("Purchase failed:", error)
-      toast.error("Purchase failed", { description: error.message || "Transaction was cancelled or failed." })
+      toast.error(`Purchase failed: ${error.message}`)
     } finally {
-      setPurchasingPackage(null)
+      setIsProcessing(null)
     }
   }
 
   return (
-    <Card className="border-border/20 bg-white/5">
+    <Card>
       <CardHeader>
-        <div className="flex items-center gap-2">
-          <Rocket className="h-5 w-5 text-primary" />
-          <CardTitle className="text-white">Purchase Line Credits</CardTitle>
-        </div>
-        <CardDescription>Buy credits to draw on any whiteboard. Credits never expire.</CardDescription>
+        <CardTitle className="flex items-center gap-2">
+          <Coins className="h-5 w-5" />
+          Purchase Line Credits
+        </CardTitle>
+        <CardDescription>Buy line credits to draw on any session. Credits never expire.</CardDescription>
       </CardHeader>
       <CardContent>
-        <div className="grid gap-4 md:grid-cols-2">
-          {Object.entries(PURCHASE_PACKAGES).map(([id, pkg]) => (
-            <Card key={id} className="border-border/50 bg-background/50">
-              <CardContent className="p-4">
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="font-semibold text-white">{pkg.name}</h3>
-                  {pkg.popular && <Badge className="bg-primary text-primary-foreground">Popular</Badge>}
-                </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {Object.values(PURCHASE_PACKAGES).map((pkg) => (
+            <Card key={pkg.id} className="relative">
+              {pkg.isPopular && (
+                <Badge className="absolute -top-2 left-4 bg-gradient-to-r from-purple-500 to-pink-500">
+                  Most Popular
+                </Badge>
+              )}
+              <CardHeader className="pb-3">
+                <CardTitle className="text-lg">{pkg.name}</CardTitle>
+                <div className="text-2xl font-bold text-primary">{pkg.price} SOL</div>
+              </CardHeader>
+              <CardContent className="pt-0">
                 <div className="space-y-2 mb-4">
-                  <div className="flex items-center gap-2">
-                    <Zap className="h-4 w-4 text-primary" />
-                    <span className="text-sm text-muted-foreground">{pkg.lines} line credits</span>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-muted-foreground">Line Credits</span>
+                    <span className="font-medium">{pkg.lines}</span>
                   </div>
-                  <div className="text-2xl font-bold text-white">{pkg.price} SOL</div>
-                  <div className="text-xs text-muted-foreground">~${(pkg.price * 100).toFixed(2)} USD</div>
                 </div>
                 <Button
-                  onClick={() => handlePurchase(id as keyof typeof PURCHASE_PACKAGES)}
-                  disabled={!publicKey || purchasingPackage === id}
+                  onClick={() => handlePurchase(pkg.id)}
+                  disabled={!publicKey || isProcessing === pkg.id}
                   className="w-full"
-                  variant={pkg.popular ? "default" : "outline"}
+                  variant={pkg.isPopular ? "default" : "outline"}
                 >
-                  {purchasingPackage === id ? (
+                  {isProcessing === pkg.id ? (
                     <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      <Zap className="mr-2 h-4 w-4 animate-spin" />
                       Processing...
                     </>
                   ) : (
-                    `Buy ${pkg.lines} Credits`
+                    <>
+                      <Coins className="mr-2 h-4 w-4" />
+                      Purchase {pkg.lines} Credits
+                    </>
                   )}
                 </Button>
               </CardContent>

@@ -7,23 +7,22 @@ export type CreditPackage = {
   isPopular?: boolean
 }
 
-const BASE_PRICE_PER_LINE = 0.002 // 0.02 SOL for 10 lines
+const BASE_PRICE_PER_LINE = 0.001 // Updated: 0.01 SOL for 10 lines
 
 export const PURCHASE_PACKAGES: Record<"small" | "large", CreditPackage> = {
   small: {
     id: "small",
     name: "Starter Pack",
     lines: 10,
-    price: 0.02,
+    price: 0.01, // Updated: 0.01 SOL for 10 lines
     pricePerLine: BASE_PRICE_PER_LINE,
   },
   large: {
     id: "large",
     name: "Creator Pack",
     lines: 50,
-    // 25% discount per line (0.002 * 0.75 = 0.0015)
-    price: 50 * (BASE_PRICE_PER_LINE * 0.75), // 0.075 SOL
-    pricePerLine: BASE_PRICE_PER_LINE * 0.75,
+    price: 0.03, // Updated: 0.03 SOL for 50 lines
+    pricePerLine: 0.0006, // 0.03 / 50 = 0.0006 per line
     isPopular: true,
   },
 }

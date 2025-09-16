@@ -6,8 +6,8 @@ export const APP_WALLET_ADDRESS = new PublicKey(
   process.env.NEXT_PUBLIC_APP_WALLET_ADDRESS || "8pYtJvvB8bZYTrYqcmjxpMcuRRqAxRtg5oNQkphKxCcY",
 )
 
-export const LINE_CREDIT_PRICE_SOL = 0.02
-export const NUKE_CREDIT_PRICE_SOL = 0.03
+export const LINE_CREDIT_PRICE_SOL = 0.001 // Updated: 0.01 SOL for 10 lines = 0.001 per line
+export const NUKE_CREDIT_PRICE_SOL = 0.01 // Updated: 0.01 SOL for default nuke
 
 export const LINES_PER_PURCHASE = 10
 
